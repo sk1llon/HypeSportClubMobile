@@ -1,0 +1,339 @@
+package com.example.mobilka.data
+
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.PropertyName
+import java.time.LocalDate
+import java.time.ZoneId
+
+// Роли пользователей
+enum class UserRole(val displayName: String) {
+    CLIENT("Клиент"),
+    TRAINER("Тренер"),
+    ADMIN("Администратор");
+    
+    companion object {
+        fun fromString(value: String): UserRole {
+            return entries.find { it.name.equals(value, ignoreCase = true) } ?: CLIENT
+        }
+    }
+}
+
+// Цели тренировок
+enum class FitnessGoal(val displayName: String) {
+    WEIGHT_LOSS("Похудение"),
+    MUSCLE_GAIN("Набор массы"),
+    MAINTENANCE("Поддержание формы");
+    
+    companion object {
+        fun fromString(value: String): FitnessGoal {
+            return entries.find { it.name.equals(value, ignoreCase = true) } ?: MAINTENANCE
+        }
+    }
+}
+
+// Пол пользователя
+enum class Gender(val displayName: String) {
+    MALE("Мужской"),
+    FEMALE("Женский");
+    
+    companion object {
+        fun fromString(value: String): Gender {
+            return entries.find { it.name.equals(value, ignoreCase = true) } ?: MALE
+        }
+    }
+}
+
+// Модель пользователя для Firestore
+data class User(
+    val id: String = "",
+    val email: String = "",
+    val phone: String = "",
+    val lastName: String = "",      // Фамилия
+    val firstName: String = "",     // Имя
+    val middleName: String = "",    // Отчество
+    val birthDate: String = "",     // Дата рождения (формат: dd.MM.yyyy)
+    val role: String = UserRole.CLIENT.name,
+    val createdAt: Timestamp = Timestamp.now(),
+    // Данные для БЖУ калькулятора
+    val gender: String = Gender.MALE.name,
+    val weight: Float = 0f,         // Вес в кг
+    val height: Float = 0f,         // Рост в см
+    val fitnessGoal: String = FitnessGoal.MAINTENANCE.name
+) {
+    // Пустой конструктор для Firestore
+    constructor() : this("", "", "", "", "", "", "", UserRole.CLIENT.name, Timestamp.now(), Gender.MALE.name, 0f, 0f, FitnessGoal.MAINTENANCE.name)
+    
+    val userRole: UserRole
+        get() = UserRole.fromString(role)
+    
+    val isAdmin: Boolean
+        get() = userRole == UserRole.ADMIN
+    
+    val isTrainer: Boolean
+        get() = userRole == UserRole.TRAINER
+    
+    val isClient: Boolean
+        get() = userRole == UserRole.CLIENT
+    
+    // Полное имя (ФИО)
+    val fullName: String
+        get() = listOf(lastName, firstName, middleName)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { "Без имени" }
+    
+    // Пол пользователя
+    val userGender: Gender
+        get() = Gender.fromString(gender)
+    
+    // Цель тренировок
+    val userFitnessGoal: FitnessGoal
+        get() = FitnessGoal.fromString(fitnessGoal)
+    
+    // Возраст на основе даты рождения
+    val age: Int
+        get() {
+            if (birthDate.isBlank()) return 0
+            return try {
+                val parts = birthDate.split(".")
+                if (parts.size != 3) return 0
+                val birthYear = parts[2].toIntOrNull() ?: return 0
+                val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                currentYear - birthYear
+            } catch (e: Exception) {
+                0
+            }
+        }
+    
+    // ИМТ (Индекс массы тела)
+    val bmi: Float
+        get() {
+            if (weight <= 0 || height <= 0) return 0f
+            val heightInMeters = height / 100
+            return weight / (heightInMeters * heightInMeters)
+        }
+    
+    // Категория ИМТ
+    val bmiCategory: String
+        get() = when {
+            bmi <= 0 -> "Не указано"
+            bmi < 18.5f -> "Недостаточный вес"
+            bmi < 25f -> "Норма"
+            bmi < 30f -> "Избыточный вес"
+            else -> "Ожирение"
+        }
+}
+
+// Модель абонемента (шаблон) для Firestore
+data class Subscription(
+    @DocumentId
+    val id: String = "",
+    val name: String = "",
+    val description: String = "",
+    val price: Int = 0,
+    val durationDays: Int = 0,
+    val features: List<String> = emptyList(),
+    val iconEmoji: String = "🏋️",
+    @get:PropertyName("active")
+    @set:PropertyName("active")
+    var active: Boolean = true
+) {
+    constructor() : this("", "", "", 0, 0, emptyList(), "🏋️", true)
+}
+
+// Модель купленного абонемента пользователя
+data class UserSubscription(
+    @DocumentId
+    val id: String = "",
+    val userId: String = "",  // ID пользователя
+    val orderId: String = "",
+    val subscriptionId: String = "",
+    val subscriptionName: String = "",
+    val subscriptionDescription: String = "",
+    val subscriptionIconEmoji: String = "🏋️",
+    val subscriptionFeatures: List<String> = emptyList(),
+    val startDate: Timestamp = Timestamp.now(),
+    val endDate: Timestamp = Timestamp.now(),
+    @get:PropertyName("active")
+    @set:PropertyName("active")
+    var active: Boolean = true
+) {
+    constructor() : this("", "", "", "", "", "", "🏋️", emptyList(), Timestamp.now(), Timestamp.now(), true)
+    
+    val startLocalDate: LocalDate
+        get() = startDate.toDate().toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+    
+    val endLocalDate: LocalDate
+        get() = endDate.toDate().toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+    
+    val remainingDays: Long
+        get() {
+            val now = LocalDate.now()
+            val end = endLocalDate
+            return java.time.temporal.ChronoUnit.DAYS.between(now, end).coerceAtLeast(0)
+        }
+    
+    val isExpired: Boolean
+        get() = remainingDays <= 0
+}
+
+// Демо-данные для начальной загрузки в Firestore
+object SubscriptionTemplates {
+    val defaultSubscriptions = listOf(
+        Subscription(
+            id = "basic",
+            name = "Базовый",
+            description = "Доступ в тренажёрный зал",
+            price = 2500,
+            durationDays = 30,
+            features = listOf(
+                "Тренажёрный зал",
+                "Раздевалки с душем",
+                "Шкафчик для вещей"
+            ),
+            iconEmoji = "💪",
+            active = true
+        ),
+        Subscription(
+            id = "standard",
+            name = "Стандарт",
+            description = "Тренажёрный зал + групповые занятия",
+            price = 4000,
+            durationDays = 30,
+            features = listOf(
+                "Тренажёрный зал",
+                "Групповые программы",
+                "Бассейн",
+                "Сауна",
+                "Раздевалки с душем"
+            ),
+            iconEmoji = "🏊",
+            active = true
+        ),
+        Subscription(
+            id = "premium",
+            name = "Премиум",
+            description = "Полный доступ ко всем услугам",
+            price = 7000,
+            durationDays = 30,
+            features = listOf(
+                "Тренажёрный зал 24/7",
+                "Все групповые программы",
+                "Бассейн и СПА",
+                "Персональный тренер (2 занятия)",
+                "Полотенца и напитки",
+                "Парковка"
+            ),
+            iconEmoji = "⭐",
+            active = true
+        ),
+        Subscription(
+            id = "vip_yearly",
+            name = "Годовой VIP",
+            description = "Максимум возможностей на год",
+            price = 60000,
+            durationDays = 365,
+            features = listOf(
+                "Всё из Премиум",
+                "Персональный тренер (8 занятий/мес)",
+                "Заморозка до 30 дней",
+                "Гостевые визиты",
+                "Приоритетная запись",
+                "Скидки на доп. услуги 20%"
+            ),
+            iconEmoji = "👑",
+            active = true
+        )
+    )
+}
+
+// Специализации тренеров
+enum class TrainerSpecialization(val displayName: String) {
+    FITNESS("Фитнес"),
+    BODYBUILDING("Бодибилдинг"),
+    CROSSFIT("Кроссфит"),
+    YOGA("Йога"),
+    PILATES("Пилатес"),
+    BOXING("Бокс"),
+    SWIMMING("Плавание"),
+    CARDIO("Кардио");
+    
+    companion object {
+        fun fromString(value: String): TrainerSpecialization {
+            return entries.find { it.name.equals(value, ignoreCase = true) } ?: FITNESS
+        }
+    }
+}
+
+// Модель тренера для Firestore
+data class Trainer(
+    @DocumentId
+    val id: String = "",
+    val userId: String = "",      // ID пользователя-тренера (связь с User)
+    val lastName: String = "",      // Фамилия
+    val firstName: String = "",     // Имя  
+    val middleName: String = "",    // Отчество
+    val birthDate: String = "",     // Дата рождения
+    val email: String = "",
+    val phone: String = "",
+    val experience: Int = 0,        // Стаж в годах
+    val specialization: String = TrainerSpecialization.FITNESS.name,
+    val achievements: List<String> = emptyList(),
+    val pricePerTraining: Int = 0,  // Цена за тренировку
+    val photoUrl: String = "",      // URL фото
+    val createdAt: Timestamp = Timestamp.now()
+) {
+    constructor() : this("", "", "", "", "", "", "", "", 0, TrainerSpecialization.FITNESS.name, emptyList(), 0, "", Timestamp.now())
+    
+    val fullName: String
+        get() = listOf(lastName, firstName, middleName)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { "Без имени" }
+    
+    val trainerSpecialization: TrainerSpecialization
+        get() = TrainerSpecialization.fromString(specialization)
+    
+    val experienceText: String
+        get() {
+            val lastDigit = experience % 10
+            val lastTwoDigits = experience % 100
+            val word = when {
+                lastTwoDigits in 11..14 -> "лет"
+                lastDigit == 1 -> "год"
+                lastDigit in 2..4 -> "года"
+                else -> "лет"
+            }
+            return "$experience $word"
+        }
+}
+
+// Модель групповой тренировки
+data class GroupWorkout(
+    @DocumentId
+    val id: String = "",
+    val name: String = "",          // Название тренировки
+    val description: String = "",
+    val trainerId: String = "",     // ID тренера
+    val trainerName: String = "",   // ФИО тренера (для отображения)
+    val dateTime: Timestamp = Timestamp.now(),
+    val durationMinutes: Int = 60,
+    val maxParticipants: Int = 20,
+    val currentParticipants: Int = 0,
+    @get:PropertyName("active")
+    @set:PropertyName("active")
+    var active: Boolean = true
+) {
+    constructor() : this("", "", "", "", "", Timestamp.now(), 60, 20, 0, true)
+    
+    val formattedDateTime: String
+        get() {
+            val date = dateTime.toDate()
+            val format = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault())
+            return format.format(date)
+        }
+    
+    val isFull: Boolean
+        get() = currentParticipants >= maxParticipants
+}

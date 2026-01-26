@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "891760021208",
+    "project_id": "hypesportclub-4eb53",
+    "storage_bucket": "hypesportclub-4eb53.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:891760021208:android:fa2e1467c99cf9c201d1ad",
+        "android_client_info": {
+          "package_name": "com.example.mobilka"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHHD1VD_Ri2Uc5jqQ9Iv-_rGQao1LuOwA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+
