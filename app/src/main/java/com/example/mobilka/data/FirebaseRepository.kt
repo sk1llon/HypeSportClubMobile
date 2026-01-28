@@ -374,14 +374,14 @@ class FirebaseRepository {
     // Получить все групповые тренировки
     suspend fun getAllGroupWorkouts(): List<GroupWorkout> {
         return try {
+            // Простой запрос без составного индекса
             val snapshot = groupWorkoutsCollection
                 .whereEqualTo("active", true)
-                .orderBy("dateTime", Query.Direction.ASCENDING)
                 .get()
                 .await()
             snapshot.documents.mapNotNull { doc ->
                 doc.toObject(GroupWorkout::class.java)?.copy(id = doc.id)
-            }
+            }.sortedBy { it.dateTime } // Сортировка в памяти
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -396,10 +396,14 @@ class FirebaseRepository {
                 "description" to workout.description,
                 "trainerId" to workout.trainerId,
                 "trainerName" to workout.trainerName,
+                "clientId" to workout.clientId,
+                "clientName" to workout.clientName,
                 "dateTime" to workout.dateTime,
                 "durationMinutes" to workout.durationMinutes,
                 "maxParticipants" to workout.maxParticipants,
                 "currentParticipants" to workout.currentParticipants,
+                "participantIds" to workout.participantIds,
+                "isIndividual" to workout.isIndividual,
                 "active" to workout.active
             )
             val docRef = groupWorkoutsCollection.add(data).await()
@@ -413,6 +417,96 @@ class FirebaseRepository {
     suspend fun deleteGroupWorkout(workoutId: String): Result<Unit> {
         return try {
             groupWorkoutsCollection.document(workoutId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Обновить групповую тренировку
+    suspend fun updateGroupWorkout(workout: GroupWorkout): Result<Unit> {
+        return try {
+            val data = hashMapOf(
+                "name" to workout.name,
+                "description" to workout.description,
+                "trainerId" to workout.trainerId,
+                "trainerName" to workout.trainerName,
+                "clientId" to workout.clientId,
+                "clientName" to workout.clientName,
+                "dateTime" to workout.dateTime,
+                "durationMinutes" to workout.durationMinutes,
+                "maxParticipants" to workout.maxParticipants,
+                "currentParticipants" to workout.currentParticipants,
+                "participantIds" to workout.participantIds,
+                "isIndividual" to workout.isIndividual,
+                "active" to workout.active
+            )
+            groupWorkoutsCollection.document(workout.id).update(data as Map<String, Any>).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Записаться на групповую тренировку
+    suspend fun signUpForWorkout(workoutId: String, userId: String): Result<Unit> {
+        return try {
+            // Получаем текущие данные тренировки
+            val workoutDoc = groupWorkoutsCollection.document(workoutId).get().await()
+            val workout = workoutDoc.toObject(GroupWorkout::class.java)
+                ?: return Result.failure(Exception("Тренировка не найдена"))
+            
+            // Проверяем, не записан ли уже пользователь
+            if (workout.participantIds.contains(userId)) {
+                return Result.failure(Exception("Вы уже записаны на эту тренировку"))
+            }
+            
+            // Проверяем, есть ли свободные места
+            if (workout.isFull) {
+                return Result.failure(Exception("На тренировке нет свободных мест"))
+            }
+            
+            // Добавляем пользователя в список участников
+            val updatedParticipants = workout.participantIds + userId
+            val updatedCount = workout.currentParticipants + 1
+            
+            groupWorkoutsCollection.document(workoutId).update(
+                mapOf(
+                    "participantIds" to updatedParticipants,
+                    "currentParticipants" to updatedCount
+                )
+            ).await()
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Отменить запись на групповую тренировку
+    suspend fun cancelWorkoutSignUp(workoutId: String, userId: String): Result<Unit> {
+        return try {
+            // Получаем текущие данные тренировки
+            val workoutDoc = groupWorkoutsCollection.document(workoutId).get().await()
+            val workout = workoutDoc.toObject(GroupWorkout::class.java)
+                ?: return Result.failure(Exception("Тренировка не найдена"))
+            
+            // Проверяем, записан ли пользователь
+            if (!workout.participantIds.contains(userId)) {
+                return Result.failure(Exception("Вы не записаны на эту тренировку"))
+            }
+            
+            // Удаляем пользователя из списка участников
+            val updatedParticipants = workout.participantIds - userId
+            val updatedCount = (workout.currentParticipants - 1).coerceAtLeast(0)
+            
+            groupWorkoutsCollection.document(workoutId).update(
+                mapOf(
+                    "participantIds" to updatedParticipants,
+                    "currentParticipants" to updatedCount
+                )
+            ).await()
+            
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -470,20 +564,20 @@ class FirebaseRepository {
                 val result = secondaryAuth.createUserWithEmailAndPassword(email, password).await()
                 val newUser = result.user ?: throw Exception("Не удалось создать пользователя")
                 val newUserId = newUser.uid
-                
+            
                 // Создаём документ пользователя в Firestore
-                val userData = hashMapOf(
-                    "email" to email,
-                    "phone" to "",
-                    "lastName" to lastName,
-                    "firstName" to firstName,
-                    "middleName" to middleName,
-                    "birthDate" to birthDate,
-                    "role" to role.name,
-                    "createdAt" to Timestamp.now()
-                )
+            val userData = hashMapOf(
+                "email" to email,
+                "phone" to "",
+                "lastName" to lastName,
+                "firstName" to firstName,
+                "middleName" to middleName,
+                "birthDate" to birthDate,
+                "role" to role.name,
+                "createdAt" to Timestamp.now()
+            )
                 usersCollection.document(newUserId).set(userData).await()
-                
+            
                 // Выходим из вторичного Auth и удаляем приложение
                 secondaryAuth.signOut()
                 secondaryApp.delete()

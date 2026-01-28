@@ -10,8 +10,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,6 +28,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -42,6 +45,7 @@ import com.example.mobilka.data.Trainer
 import com.example.mobilka.data.TrainerSpecialization
 import com.example.mobilka.data.User
 import com.example.mobilka.data.UserRole
+import com.example.mobilka.ui.theme.SportOrange
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -67,10 +71,14 @@ enum class SortOption {
 data class TrainerFormData(
     val phone: String = "",
     val experience: Int = 0,
-    val specialization: TrainerSpecialization = TrainerSpecialization.FITNESS,
+    val specializations: List<TrainerSpecialization> = listOf(TrainerSpecialization.FITNESS),
     val pricePerTraining: Int = 0,
     val photoUrl: String = ""
-)
+) {
+    // Для обратной совместимости - основная специализация
+    val specialization: TrainerSpecialization
+        get() = specializations.firstOrNull() ?: TrainerSpecialization.FITNESS
+}
 
 enum class AdminViewMode {
     USERS,
@@ -104,11 +112,14 @@ fun AdminScreen(
     var isLoading by remember { mutableStateOf(true) }
     var showAddSubscriptionDialog by remember { mutableStateOf(false) }
     var showAddGroupWorkoutDialog by remember { mutableStateOf(false) }
+    var showAddIndividualWorkoutDialog by remember { mutableStateOf(false) }
+    var showWorkoutTypeSelection by remember { mutableStateOf(false) }
     var showEditSubscriptionDialog by remember { mutableStateOf<Subscription?>(null) }
     var showEditUserDialog by remember { mutableStateOf<User?>(null) }
     var showDeleteSubscriptionDialog by remember { mutableStateOf<Subscription?>(null) }
     var showDeleteUserDialog by remember { mutableStateOf<User?>(null) }
     var showDeleteGroupWorkoutDialog by remember { mutableStateOf<GroupWorkout?>(null) }
+    var showEditWorkoutDialog by remember { mutableStateOf<GroupWorkout?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
     
@@ -250,7 +261,7 @@ fun AdminScreen(
                         text = when (currentView) {
                             AdminViewMode.USERS -> Strings.usersManagement(lang)
                             AdminViewMode.SUBSCRIPTIONS -> Strings.subscriptionsManagement(lang)
-                            AdminViewMode.GROUP_WORKOUTS -> Strings.groupWorkoutsManagement(lang)
+                            AdminViewMode.GROUP_WORKOUTS -> Strings.workoutsManagement(lang)
                             AdminViewMode.ADD_USER -> if (addUserSelectedRole == null) 
                                 Strings.newUser(lang)
                             else when (addUserSelectedRole!!) {
@@ -280,17 +291,17 @@ fun AdminScreen(
                             )
                         }
                         // Кнопка выхода
-                        IconButton(
-                            onClick = {
-                                repository.logout()
-                                onLogout()
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                    IconButton(
+                        onClick = {
+                            repository.logout()
+                            onLogout()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                                 contentDescription = Strings.logout(lang),
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                            tint = MaterialTheme.colorScheme.error
+                        )
                         }
                     }
                 },
@@ -329,12 +340,12 @@ fun AdminScreen(
                 }
                 AdminViewMode.GROUP_WORKOUTS -> {
                     FloatingActionButton(
-                        onClick = { showAddGroupWorkoutDialog = true },
+                        onClick = { showWorkoutTypeSelection = true },
                         containerColor = MaterialTheme.colorScheme.primary
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = Strings.newGroupWorkout(lang)
+                            contentDescription = Strings.addWorkout(lang)
                         )
                     }
                 }
@@ -349,29 +360,29 @@ fun AdminScreen(
         ) {
             // Кнопки переключения режимов (скрываем при добавлении пользователя)
             if (currentView != AdminViewMode.ADD_USER) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    AdminMenuButton(
-                        icon = Icons.Default.Person,
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AdminMenuButton(
+                    icon = Icons.Default.Person,
                         label = Strings.users(lang),
-                        isSelected = currentView == AdminViewMode.USERS,
-                        onClick = { currentView = AdminViewMode.USERS },
-                        modifier = Modifier.weight(1f)
-                    )
-                    AdminMenuButton(
-                        icon = Icons.Default.Star,
+                    isSelected = currentView == AdminViewMode.USERS,
+                    onClick = { currentView = AdminViewMode.USERS },
+                    modifier = Modifier.weight(1f)
+                )
+                AdminMenuButton(
+                    icon = Icons.Default.Star,
                         label = Strings.subscriptions(lang),
-                        isSelected = currentView == AdminViewMode.SUBSCRIPTIONS,
-                        onClick = { currentView = AdminViewMode.SUBSCRIPTIONS },
-                        modifier = Modifier.weight(1f)
-                    )
+                    isSelected = currentView == AdminViewMode.SUBSCRIPTIONS,
+                    onClick = { currentView = AdminViewMode.SUBSCRIPTIONS },
+                    modifier = Modifier.weight(1f)
+                )
                     AdminMenuButton(
                         icon = Icons.Default.DateRange,
-                        label = Strings.group(lang),
+                        label = Strings.workouts(lang),
                         isSelected = currentView == AdminViewMode.GROUP_WORKOUTS,
                         onClick = { currentView = AdminViewMode.GROUP_WORKOUTS },
                         modifier = Modifier.weight(1f)
@@ -416,11 +427,16 @@ fun AdminScreen(
                             )
                         }
                         AdminViewMode.GROUP_WORKOUTS -> {
-                            GroupWorkoutsListView(
+                            WorkoutsManagementView(
                                 groupWorkouts = groupWorkouts,
+                                trainers = trainers,
+                                onWorkoutEdit = { workout ->
+                                    showEditWorkoutDialog = workout
+                                },
                                 onWorkoutDelete = { workout ->
                                     showDeleteGroupWorkoutDialog = workout
                                 },
+                                onAddWorkout = { showWorkoutTypeSelection = true },
                                 lang = lang
                             )
                         }
@@ -461,6 +477,7 @@ fun AdminScreen(
                                                         phone = trainerData.phone,
                                                         experience = trainerData.experience,
                                                         specialization = trainerData.specialization.name,
+                                                        specializations = trainerData.specializations.map { it.name },
                                                         pricePerTraining = trainerData.pricePerTraining,
                                                         photoUrl = trainerData.photoUrl
                                                     )
@@ -598,6 +615,47 @@ fun AdminScreen(
         )
     }
     
+    // Полноэкранный выбор типа тренировки
+    if (showWorkoutTypeSelection) {
+        WorkoutTypeSelectionScreen(
+            onSelectIndividual = {
+                showWorkoutTypeSelection = false
+                showAddIndividualWorkoutDialog = true
+            },
+            onSelectGroup = {
+                showWorkoutTypeSelection = false
+                showAddGroupWorkoutDialog = true
+            },
+            onDismiss = { showWorkoutTypeSelection = false },
+            lang = lang
+        )
+    }
+    
+    // Диалог добавления индивидуальной тренировки
+    if (showAddIndividualWorkoutDialog) {
+        AddIndividualWorkoutDialog(
+            trainers = trainers,
+            clients = users.filter { it.userRole == UserRole.CLIENT },
+            onDismiss = { showAddIndividualWorkoutDialog = false },
+            onAdd = { workout ->
+                scope.launch {
+                    val result = repository.addGroupWorkout(workout)
+                    result.fold(
+                        onSuccess = {
+                            successMessage = Strings.workoutCreated(lang)
+                            showAddIndividualWorkoutDialog = false
+                            groupWorkouts = repository.getAllGroupWorkouts()
+                        },
+                        onFailure = { e ->
+                            errorMessage = "${Strings.error(lang)}: ${e.message}"
+                        }
+                    )
+                }
+            },
+            lang = lang
+        )
+    }
+    
     // Диалог добавления групповой тренировки
     if (showAddGroupWorkoutDialog) {
         AddGroupWorkoutDialog(
@@ -610,6 +668,32 @@ fun AdminScreen(
                         onSuccess = {
                             successMessage = Strings.workoutCreated(lang)
                             showAddGroupWorkoutDialog = false
+                            groupWorkouts = repository.getAllGroupWorkouts()
+                        },
+                        onFailure = { e ->
+                            errorMessage = "${Strings.error(lang)}: ${e.message}"
+                        }
+                    )
+                }
+            },
+            lang = lang
+        )
+    }
+    
+    // Диалог редактирования тренировки
+    if (showEditWorkoutDialog != null) {
+        EditWorkoutDialog(
+            workout = showEditWorkoutDialog!!,
+            trainers = trainers,
+            clients = users.filter { it.userRole == UserRole.CLIENT },
+            onDismiss = { showEditWorkoutDialog = null },
+            onSave = { updatedWorkout ->
+                scope.launch {
+                    val result = repository.updateGroupWorkout(updatedWorkout)
+                    result.fold(
+                        onSuccess = {
+                            successMessage = if (lang == AppLanguage.RUSSIAN) "Тренировка обновлена" else "Workout updated"
+                            showEditWorkoutDialog = null
                             groupWorkouts = repository.getAllGroupWorkouts()
                         },
                         onFailure = { e ->
@@ -951,9 +1035,9 @@ private fun UsersListView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
+            Text(
                     text = "${Strings.allUsers(lang)} (${users.size})",
-                    style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 
@@ -1072,10 +1156,527 @@ private fun SubscriptionsListView(
     }
 }
 
-// Список групповых тренировок
+// Управление тренировками с календарём и фильтром по тренеру
+@Composable
+private fun WorkoutsManagementView(
+    groupWorkouts: List<GroupWorkout>,
+    trainers: List<Trainer>,
+    onWorkoutEdit: (GroupWorkout) -> Unit,
+    onWorkoutDelete: (GroupWorkout) -> Unit,
+    onAddWorkout: () -> Unit,
+    lang: AppLanguage
+) {
+    // Текущая дата для определения недели
+    var currentWeekStart by remember { 
+        mutableStateOf(getWeekStart(Calendar.getInstance())) 
+    }
+    
+    // Выбранная дата (null = показать все)
+    var selectedDate by remember { 
+        mutableStateOf<Calendar?>(Calendar.getInstance()) 
+    }
+    
+    // Выбранный тренер (null = все тренеры)
+    var selectedTrainerId by remember { mutableStateOf<String?>(null) }
+    var showTrainerDropdown by remember { mutableStateOf(false) }
+    
+    // Фильтр по типу тренировки: 0 = все, 1 = индивидуальные, 2 = групповые
+    var workoutTypeFilter by remember { mutableStateOf(0) }
+    var showTypeFilterDropdown by remember { mutableStateOf(false) }
+    
+    // Фильтрация тренировок по дате, тренеру и типу
+    val filteredWorkouts = remember(groupWorkouts, selectedDate, selectedTrainerId, workoutTypeFilter) {
+        val currentSelectedDate = selectedDate // Локальная переменная для smart cast
+        groupWorkouts.filter { workout ->
+            // Проверяем дату (если выбрана)
+            val dateMatches = if (currentSelectedDate != null) {
+                val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                val selectedDateStr = dateFormat.format(currentSelectedDate.time)
+                val workoutDateStr = workout.formattedDateTime.split(" ").firstOrNull() ?: ""
+                workoutDateStr == selectedDateStr
+            } else {
+                true // Показываем все, если дата не выбрана
+            }
+            
+            // Проверяем тренера
+            val trainerMatches = selectedTrainerId == null || workout.trainerId == selectedTrainerId
+            
+            // Проверяем тип тренировки
+            val typeMatches = when (workoutTypeFilter) {
+                1 -> workout.isIndividualWorkout // Только индивидуальные
+                2 -> !workout.isIndividualWorkout // Только групповые
+                else -> true // Все
+            }
+            
+            dateMatches && trainerMatches && typeMatches
+        }.sortedBy { it.dateTime }
+    }
+    
+    // Получаем имя выбранного тренера
+    val selectedTrainerName = remember(selectedTrainerId, trainers) {
+        selectedTrainerId?.let { id -> 
+            trainers.find { it.id == id }?.fullName 
+        } ?: Strings.allTrainers(lang)
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        // Навигация по неделям
+        WeekNavigationHeader(
+            currentWeekStart = currentWeekStart,
+            onPreviousWeek = {
+                val newWeek = currentWeekStart.clone() as Calendar
+                newWeek.add(Calendar.WEEK_OF_YEAR, -1)
+                currentWeekStart = getWeekStart(newWeek)
+            },
+            onNextWeek = {
+                val newWeek = currentWeekStart.clone() as Calendar
+                newWeek.add(Calendar.WEEK_OF_YEAR, 1)
+                currentWeekStart = getWeekStart(newWeek)
+            },
+            lang = lang
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // Календарь на неделю
+        WeekCalendar(
+            weekStart = currentWeekStart,
+            selectedDate = selectedDate,
+            onDateSelected = { selectedDate = it },
+            lang = lang
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Кнопка "Показать все тренировки"
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (lang == AppLanguage.RUSSIAN) "Всего тренировок: ${groupWorkouts.size}" else "Total workouts: ${groupWorkouts.size}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(
+                onClick = { selectedDate = null }
+            ) {
+                Text(
+                    text = if (selectedDate == null) 
+                        (if (lang == AppLanguage.RUSSIAN) "Выбрана: Все даты" else "Selected: All dates")
+                    else 
+                        (if (lang == AppLanguage.RUSSIAN) "Показать все" else "Show all"),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Выпадающий список тренеров
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showTrainerDropdown = true },
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = Strings.selectTrainer(lang),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = selectedTrainerName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showTrainerDropdown) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null
+                    )
+                }
+            }
+            
+            DropdownMenu(
+                expanded = showTrainerDropdown,
+                onDismissRequest = { showTrainerDropdown = false },
+                modifier = Modifier.fillMaxWidth(0.9f)
+            ) {
+                DropdownMenuItem(
+                    text = { 
+                        Text(
+                            text = Strings.allTrainers(lang),
+                            fontWeight = if (selectedTrainerId == null) FontWeight.Bold else FontWeight.Normal
+                        ) 
+                    },
+                    onClick = {
+                        selectedTrainerId = null
+                        showTrainerDropdown = false
+                    },
+                    leadingIcon = {
+                        Text(text = "👥", fontSize = 20.sp)
+                    }
+                )
+                trainers.forEach { trainer ->
+                    DropdownMenuItem(
+                        text = { 
+                            Text(
+                                text = trainer.fullName,
+                                fontWeight = if (selectedTrainerId == trainer.id) FontWeight.Bold else FontWeight.Normal
+                            ) 
+                        },
+                        onClick = {
+                            selectedTrainerId = trainer.id
+                            showTrainerDropdown = false
+                        },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Заголовок с датой и фильтром по типу
+        val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault())
+        val headerText = selectedDate?.let { date ->
+            "${Strings.workoutsForDate(lang)} ${dateFormat.format(date.time)}"
+        } ?: if (lang == AppLanguage.RUSSIAN) "Все тренировки" else "All workouts"
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = headerText,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            
+            // Кнопка фильтра по типу (только когда показываем все даты)
+            if (selectedDate == null) {
+                Box {
+                    val filterText = when (workoutTypeFilter) {
+                        1 -> if (lang == AppLanguage.RUSSIAN) "Индивидуальные" else "Individual"
+                        2 -> if (lang == AppLanguage.RUSSIAN) "Групповые" else "Group"
+                        else -> if (lang == AppLanguage.RUSSIAN) "Все" else "All"
+                    }
+                    FilterChip(
+                        selected = workoutTypeFilter != 0,
+                        onClick = { showTypeFilterDropdown = true },
+                        label = { Text(filterText, style = MaterialTheme.typography.bodySmall) },
+                        trailingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    )
+                    
+                    DropdownMenu(
+                        expanded = showTypeFilterDropdown,
+                        onDismissRequest = { showTypeFilterDropdown = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    text = if (lang == AppLanguage.RUSSIAN) "Все тренировки" else "All workouts",
+                                    fontWeight = if (workoutTypeFilter == 0) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            onClick = {
+                                workoutTypeFilter = 0
+                                showTypeFilterDropdown = false
+                            },
+                            leadingIcon = { Text("📋") }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    text = if (lang == AppLanguage.RUSSIAN) "Индивидуальные" else "Individual",
+                                    fontWeight = if (workoutTypeFilter == 1) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            onClick = {
+                                workoutTypeFilter = 1
+                                showTypeFilterDropdown = false
+                            },
+                            leadingIcon = { Text("🏋️") }
+                        )
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    text = if (lang == AppLanguage.RUSSIAN) "Групповые" else "Group",
+                                    fontWeight = if (workoutTypeFilter == 2) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            onClick = {
+                                workoutTypeFilter = 2
+                                showTypeFilterDropdown = false
+                            },
+                            leadingIcon = { Text("👥") }
+                        )
+                    }
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // Список тренировок
+        if (filteredWorkouts.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("📅", fontSize = 48.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = Strings.noWorkoutsForDate(lang),
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = onAddWorkout,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(Strings.addWorkout(lang))
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(filteredWorkouts, key = { it.id }) { workout ->
+                    GroupWorkoutCard(
+                        workout = workout,
+                        onEdit = { onWorkoutEdit(workout) },
+                        onDelete = { onWorkoutDelete(workout) },
+                        lang = lang
+                    )
+                }
+                
+                item {
+                    Spacer(modifier = Modifier.height(80.dp))
+                }
+            }
+        }
+    }
+}
+
+// Получить начало недели (понедельник)
+private fun getWeekStart(calendar: Calendar): Calendar {
+    val result = calendar.clone() as Calendar
+    result.firstDayOfWeek = Calendar.MONDAY
+    result.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+    result.set(Calendar.HOUR_OF_DAY, 0)
+    result.set(Calendar.MINUTE, 0)
+    result.set(Calendar.SECOND, 0)
+    result.set(Calendar.MILLISECOND, 0)
+    return result
+}
+
+// Заголовок с навигацией по неделям
+@Composable
+private fun WeekNavigationHeader(
+    currentWeekStart: Calendar,
+    onPreviousWeek: () -> Unit,
+    onNextWeek: () -> Unit,
+    lang: AppLanguage
+) {
+    val weekEnd = (currentWeekStart.clone() as Calendar).apply {
+        add(Calendar.DAY_OF_YEAR, 6)
+    }
+    
+    val dateFormat = SimpleDateFormat("dd.MM", Locale.getDefault())
+    val monthYearFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onPreviousWeek) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = Strings.back(lang)
+            )
+        }
+        
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "${dateFormat.format(currentWeekStart.time)} - ${dateFormat.format(weekEnd.time)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = monthYearFormat.format(currentWeekStart.time),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        
+        IconButton(onClick = onNextWeek) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null
+            )
+        }
+    }
+}
+
+// Календарь на неделю
+@Composable
+private fun WeekCalendar(
+    weekStart: Calendar,
+    selectedDate: Calendar?,
+    onDateSelected: (Calendar) -> Unit,
+    lang: AppLanguage
+) {
+    val today = remember { Calendar.getInstance() }
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        for (i in 0..6) {
+            val day = (weekStart.clone() as Calendar).apply {
+                add(Calendar.DAY_OF_YEAR, i)
+            }
+            
+            val isSelected = selectedDate != null && isSameDay(day, selectedDate)
+            val isToday = isSameDay(day, today)
+            
+            DayCell(
+                day = day,
+                isSelected = isSelected,
+                isToday = isToday,
+                onClick = { onDateSelected(day) },
+                lang = lang,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+// Ячейка дня в календаре
+@Composable
+private fun DayCell(
+    day: Calendar,
+    isSelected: Boolean,
+    isToday: Boolean,
+    onClick: () -> Unit,
+    lang: AppLanguage,
+    modifier: Modifier = Modifier
+) {
+    val dayOfWeek = Strings.getDayOfWeekShort(day.get(Calendar.DAY_OF_WEEK), lang)
+    val dayNumber = day.get(Calendar.DAY_OF_MONTH)
+    
+    // Более тусклый цвет для текущего дня (не выбранного)
+    val todayBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
+    
+    val backgroundColor = when {
+        isSelected -> MaterialTheme.colorScheme.primary
+        isToday -> todayBackgroundColor
+        else -> Color.Transparent
+    }
+    
+    val textColor = when {
+        isSelected -> Color.White
+        isToday -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    
+    Column(
+        modifier = modifier
+            .padding(2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(backgroundColor)
+            .clickable { onClick() }
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = dayOfWeek,
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor.copy(alpha = 0.7f)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = dayNumber.toString(),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = textColor
+        )
+        if (isToday && !isSelected) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Box(
+                modifier = Modifier
+                    .size(4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
+    }
+}
+
+// Проверка, что две даты - один день
+private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+            cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+}
+
+// Список групповых тренировок (старый, оставляем для совместимости)
 @Composable
 private fun GroupWorkoutsListView(
     groupWorkouts: List<GroupWorkout>,
+    onWorkoutEdit: (GroupWorkout) -> Unit,
     onWorkoutDelete: (GroupWorkout) -> Unit,
     lang: AppLanguage
 ) {
@@ -1126,6 +1727,7 @@ private fun GroupWorkoutsListView(
         items(groupWorkouts, key = { it.id }) { workout ->
             GroupWorkoutCard(
                 workout = workout,
+                onEdit = { onWorkoutEdit(workout) },
                 onDelete = { onWorkoutDelete(workout) },
                 lang = lang
             )
@@ -1141,11 +1743,21 @@ private fun GroupWorkoutsListView(
 @Composable
 private fun GroupWorkoutCard(
     workout: GroupWorkout,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     lang: AppLanguage
 ) {
+    // Формируем заголовок: для индивидуальных "Индивидуальная тренировка", для групповых "Групповая - название"
+    val displayTitle = if (workout.isIndividualWorkout) {
+        if (lang == AppLanguage.RUSSIAN) "Индивидуальная тренировка" else "Individual workout"
+    } else {
+        "${if (lang == AppLanguage.RUSSIAN) "Групповая" else "Group"} - ${workout.name}"
+    }
+    
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onEdit() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -1165,7 +1777,10 @@ private fun GroupWorkoutCard(
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "🏃", fontSize = 28.sp)
+                Text(
+                    text = if (workout.isIndividualWorkout) "🏋️" else "👥",
+                    fontSize = 28.sp
+                )
             }
             
             Spacer(modifier = Modifier.width(12.dp))
@@ -1173,12 +1788,20 @@ private fun GroupWorkoutCard(
             // Информация
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = workout.name,
+                    text = displayTitle,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
+                // Для индивидуальных показываем клиента
+                if (workout.isIndividualWorkout && workout.clientName.isNotBlank()) {
+                    Text(
+                        text = "👤 ${workout.clientName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SportOrange
+                    )
+                }
                 Text(
-                    text = workout.trainerName,
+                    text = "🏃 ${workout.trainerName}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -1194,7 +1817,7 @@ private fun GroupWorkoutCard(
                 )
             }
             
-            // Кнопка удаления
+            // Кнопка удаления (редактирование через нажатие на карточку)
             IconButton(onClick = onDelete) {
                 Icon(
                     imageVector = Icons.Default.Delete,
@@ -1440,12 +2063,12 @@ private fun UserCard(
             
             // Кнопки действий
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = onEdit) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
+            IconButton(onClick = onEdit) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
                         contentDescription = Strings.edit(lang),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    tint = MaterialTheme.colorScheme.primary
+                )
                 }
                 IconButton(onClick = onDelete) {
                     Icon(
@@ -1503,12 +2126,13 @@ private fun AddUserFullScreen(
     var firstName by remember { mutableStateOf("") }
     var middleName by remember { mutableStateOf("") }
     var birthDateValue by remember { mutableStateOf(TextFieldValue("")) }
+    var birthDateError by remember { mutableStateOf(false) }
     var selectedGender by remember { mutableStateOf(Gender.MALE) }
     var photoUrl by remember { mutableStateOf("") }
     
     // Дополнительные поля для тренера
     var experience by remember { mutableStateOf("") }
-    var specialization by remember { mutableStateOf(TrainerSpecialization.FITNESS) }
+    var selectedSpecializations by remember { mutableStateOf(setOf(TrainerSpecialization.FITNESS)) }
     var pricePerTraining by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     
@@ -1523,7 +2147,7 @@ private fun AddUserFullScreen(
         selectedGender = Gender.MALE
         photoUrl = ""
         experience = ""
-        specialization = TrainerSpecialization.FITNESS
+        selectedSpecializations = setOf(TrainerSpecialization.FITNESS)
         pricePerTraining = ""
         phone = ""
     }
@@ -1550,11 +2174,11 @@ private fun AddUserFullScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "ℹ️", fontSize = 24.sp)
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text(
+            Text(
                                 text = Strings.createNewUser(lang),
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
+                fontWeight = FontWeight.Bold
+            )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
@@ -1650,7 +2274,9 @@ private fun AddUserFullScreen(
                          password.length >= 6 && 
                          lastName.isNotBlank() && 
                          firstName.isNotBlank() && 
-                         birthDateValue.text.length == 10
+                         birthDateValue.text.length == 10 &&
+                         !birthDateError &&
+                         isValidDate(birthDateValue.text)
         
         Column(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
@@ -1669,111 +2295,116 @@ private fun AddUserFullScreen(
                 }
                 
                 item {
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it.trim() },
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it.trim() },
                         label = { Text("${Strings.email(lang)} *") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email,
-                            imeAction = ImeAction.Next
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Next
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
                 }
                 
                 item {
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
                         label = { Text("${Strings.password(lang)} * (${Strings.minSixChars(lang)})") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Password,
-                            imeAction = ImeAction.Next
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Next
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         supportingText = if (password.isNotBlank() && password.length < 6) {
                             { Text(Strings.minSixChars(lang), color = MaterialTheme.colorScheme.error) }
                         } else null
-                    )
+                )
                 }
                 
                 item {
-                    OutlinedTextField(
-                        value = lastName,
-                        onValueChange = { lastName = it },
+                OutlinedTextField(
+                    value = lastName,
+                    onValueChange = { lastName = it },
                         label = { Text("${Strings.lastName(lang)} *") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
                 }
                 
                 item {
-                    OutlinedTextField(
-                        value = firstName,
-                        onValueChange = { firstName = it },
+                OutlinedTextField(
+                    value = firstName,
+                    onValueChange = { firstName = it },
                         label = { Text("${Strings.firstName(lang)} *") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
                 }
                 
                 item {
-                    OutlinedTextField(
-                        value = middleName,
-                        onValueChange = { middleName = it },
+                OutlinedTextField(
+                    value = middleName,
+                    onValueChange = { middleName = it },
                         label = { Text(Strings.middleName(lang)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
                 }
                 
                 item {
-                    OutlinedTextField(
+                OutlinedTextField(
                         value = birthDateValue,
                         onValueChange = { newValue ->
                             birthDateValue = formatDateInput(newValue)
+                            birthDateError = newValue.text.length == 10 && !isValidDate(newValue.text)
                         },
                         label = { Text("${Strings.birthDate(lang)} *") },
-                        placeholder = { Text("ДД.ММ.ГГГГ") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Next
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    placeholder = { Text("ДД.ММ.ГГГГ") },
+                    singleLine = true,
+                        isError = birthDateError,
+                        supportingText = if (birthDateError) {
+                            { Text(if (lang == AppLanguage.RUSSIAN) "Неверная дата" else "Invalid date") }
+                        } else null,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
                 }
                 
                 item {
-                    Text(
+                Text(
                         text = "${Strings.gender(lang)}:",
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                    style = MaterialTheme.typography.labelLarge
+                )
                 }
                 
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                         Gender.entries.forEach { gender ->
                             val genderName = when (gender) {
                                 Gender.MALE -> Strings.male(lang)
                                 Gender.FEMALE -> Strings.female(lang)
                             }
-                            FilterChip(
+                        FilterChip(
                                 selected = selectedGender == gender,
                                 onClick = { selectedGender = gender },
                                 label = { 
@@ -1864,13 +2495,13 @@ private fun AddUserFullScreen(
                     
                     item {
                         Text(
-                            text = "${Strings.specialization(lang)}:",
+                            text = "${Strings.specialization(lang)} (${if (lang == AppLanguage.RUSSIAN) "выберите несколько" else "select multiple"}):",
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
                     
                     item {
-                        // Специализация в виде сетки
+                        // Специализация в виде сетки с множественным выбором
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             TrainerSpecialization.entries.chunked(2).forEach { row ->
                                 Row(
@@ -1879,9 +2510,21 @@ private fun AddUserFullScreen(
                                 ) {
                                     row.forEach { spec ->
                                         val specName = getSpecializationName(spec, lang)
+                                        val isSelected = selectedSpecializations.contains(spec)
                                         FilterChip(
-                                            selected = specialization == spec,
-                                            onClick = { specialization = spec },
+                                            selected = isSelected,
+                                            onClick = { 
+                                                selectedSpecializations = if (isSelected) {
+                                                    // Не позволяем убрать последнюю специализацию
+                                                    if (selectedSpecializations.size > 1) {
+                                                        selectedSpecializations - spec
+                                                    } else {
+                                                        selectedSpecializations
+                                                    }
+                                                } else {
+                                                    selectedSpecializations + spec
+                                                }
+                                            },
                                             label = { 
                                                 Text(
                                                     text = specName,
@@ -1923,13 +2566,13 @@ private fun AddUserFullScreen(
                         Text(Strings.back(lang))
                     }
                     
-                    Button(
-                        onClick = { 
+            Button(
+                onClick = { 
                             val trainerData = if (selectedRole == UserRole.TRAINER) {
                                 TrainerFormData(
                                     phone = phone,
                                     experience = experience.toIntOrNull() ?: 0,
-                                    specialization = specialization,
+                                    specializations = selectedSpecializations.toList(),
                                     pricePerTraining = pricePerTraining.toIntOrNull() ?: 0,
                                     photoUrl = photoUrl
                                 )
@@ -2093,6 +2736,488 @@ private fun AddSubscriptionDialog(
     )
 }
 
+// Функция валидации даты в формате DD.MM.YYYY
+private fun isValidDate(dateStr: String): Boolean {
+    if (dateStr.isBlank()) return false
+    val parts = dateStr.split(".")
+    if (parts.size != 3) return false
+    
+    return try {
+        val day = parts[0].toIntOrNull() ?: return false
+        val month = parts[1].toIntOrNull() ?: return false
+        val year = parts[2].toIntOrNull() ?: return false
+        
+        if (year < 1900 || year > 2100) return false
+        if (month < 1 || month > 12) return false
+        if (day < 1 || day > 31) return false
+        
+        // Проверка количества дней в месяце
+        val maxDays = when (month) {
+            1, 3, 5, 7, 8, 10, 12 -> 31
+            4, 6, 9, 11 -> 30
+            2 -> if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) 29 else 28
+            else -> return false
+        }
+        
+        day <= maxDays
+    } catch (e: Exception) {
+        false
+    }
+}
+
+// Функция валидации даты и времени в формате DD.MM.YYYY HH:MM
+private fun isValidDateTime(dateTimeStr: String): Boolean {
+    if (dateTimeStr.isBlank()) return false
+    val parts = dateTimeStr.split(" ")
+    if (parts.size != 2) return false
+    
+    val datePart = parts[0]
+    val timePart = parts[1]
+    
+    // Валидация даты
+    if (!isValidDate(datePart)) return false
+    
+    // Валидация времени
+    val timeParts = timePart.split(":")
+    if (timeParts.size != 2) return false
+    
+    return try {
+        val hour = timeParts[0].toIntOrNull() ?: return false
+        val minute = timeParts[1].toIntOrNull() ?: return false
+        
+        hour in 0..23 && minute in 0..59
+    } catch (e: Exception) {
+        false
+    }
+}
+
+// Полноэкранный выбор типа тренировки
+@Composable
+private fun WorkoutTypeSelectionScreen(
+    onSelectIndividual: () -> Unit,
+    onSelectGroup: () -> Unit,
+    onDismiss: () -> Unit,
+    lang: AppLanguage
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxWidth(),
+        title = {
+            Text(
+                text = Strings.addWorkout(lang),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) 
+                        "Выберите тип тренировки:" 
+                    else 
+                        "Select workout type:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                // Индивидуальная тренировка
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectIndividual() },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "🏋️", fontSize = 28.sp)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = Strings.individualWorkout(lang),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (lang == AppLanguage.RUSSIAN) 
+                                    "Персональное занятие с тренером" 
+                                else 
+                                    "Personal session with trainer",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                
+                // Групповая тренировка
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectGroup() },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.secondary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "👥", fontSize = 28.sp)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = Strings.groupWorkout(lang),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (lang == AppLanguage.RUSSIAN) 
+                                    "Занятие для группы участников" 
+                                else 
+                                    "Session for multiple participants",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(Strings.cancel(lang))
+            }
+        },
+        shape = RoundedCornerShape(24.dp)
+    )
+}
+
+// Диалог добавления индивидуальной тренировки
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddIndividualWorkoutDialog(
+    trainers: List<Trainer>,
+    clients: List<User>,
+    onDismiss: () -> Unit,
+    onAdd: (GroupWorkout) -> Unit,
+    lang: AppLanguage
+) {
+    var selectedTrainer by remember { mutableStateOf<Trainer?>(null) }
+    var trainerSearchQuery by remember { mutableStateOf("") }
+    var selectedClient by remember { mutableStateOf<User?>(null) }
+    var clientSearchQuery by remember { mutableStateOf("") }
+    var dateTimeStr by remember { mutableStateOf("") }
+    var durationMinutes by remember { mutableStateOf("60") }
+    var showTrainerDropdown by remember { mutableStateOf(false) }
+    var showClientDropdown by remember { mutableStateOf(false) }
+    var dateTimeError by remember { mutableStateOf(false) }
+    
+    // Фильтрация тренеров по введённому тексту
+    val filteredTrainers = remember(trainerSearchQuery, trainers) {
+        if (trainerSearchQuery.isBlank()) {
+            trainers.take(10)
+        } else {
+            trainers.filter { 
+                it.fullName.lowercase().contains(trainerSearchQuery.lowercase()) ||
+                it.specializationsText.lowercase().contains(trainerSearchQuery.lowercase())
+            }.take(10)
+        }
+    }
+    
+    // Фильтрация клиентов по введённому тексту
+    val filteredClients = remember(clientSearchQuery, clients) {
+        if (clientSearchQuery.isBlank()) {
+            clients.take(10)
+        } else {
+            clients.filter { 
+                it.fullName.lowercase().contains(clientSearchQuery.lowercase()) ||
+                it.email.lowercase().contains(clientSearchQuery.lowercase())
+            }.take(10)
+        }
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "🏋️", fontSize = 24.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = Strings.individualWorkout(lang),
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Поиск и выбор клиента с автодополнением
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (selectedClient != null) selectedClient!!.fullName else clientSearchQuery,
+                        onValueChange = { 
+                            clientSearchQuery = it
+                            selectedClient = null
+                            showClientDropdown = true
+                        },
+                        label = { Text(if (lang == AppLanguage.RUSSIAN) "ФИО клиента" else "Client name") },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (selectedClient != null) {
+                                IconButton(onClick = { 
+                                    selectedClient = null
+                                    clientSearchQuery = ""
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = null)
+                                }
+                            } else {
+                                IconButton(onClick = { showClientDropdown = !showClientDropdown }) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    DropdownMenu(
+                        expanded = showClientDropdown && filteredClients.isNotEmpty(),
+                        onDismissRequest = { showClientDropdown = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        filteredClients.forEach { client ->
+                            DropdownMenuItem(
+                                text = { 
+                                    Column {
+                                        Text(
+                                            text = client.fullName,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = client.email,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedClient = client
+                                    clientSearchQuery = ""
+                                    showClientDropdown = false
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = client.firstName.firstOrNull()?.uppercase() ?: "?",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                // Поиск и выбор тренера с автодополнением
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (selectedTrainer != null) selectedTrainer!!.fullName else trainerSearchQuery,
+                        onValueChange = { 
+                            trainerSearchQuery = it
+                            selectedTrainer = null
+                            showTrainerDropdown = true
+                        },
+                        label = { Text(Strings.selectTrainer(lang)) },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (selectedTrainer != null) {
+                                IconButton(onClick = { 
+                                    selectedTrainer = null
+                                    trainerSearchQuery = ""
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = null)
+                                }
+                            } else {
+                                IconButton(onClick = { showTrainerDropdown = !showTrainerDropdown }) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    DropdownMenu(
+                        expanded = showTrainerDropdown && filteredTrainers.isNotEmpty(),
+                        onDismissRequest = { showTrainerDropdown = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        filteredTrainers.forEach { trainer ->
+                            DropdownMenuItem(
+                                text = { 
+                                    Column {
+                                        Text(
+                                            text = trainer.fullName,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = trainer.specializationsText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedTrainer = trainer
+                                    trainerSearchQuery = ""
+                                    showTrainerDropdown = false
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(SportOrange),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                        if (filteredTrainers.isEmpty() && trainerSearchQuery.isNotBlank()) {
+                            DropdownMenuItem(
+                                text = { Text(Strings.noTrainers(lang)) },
+                                onClick = { showTrainerDropdown = false }
+                            )
+                        }
+                    }
+                }
+                
+                OutlinedTextField(
+                    value = dateTimeStr,
+                    onValueChange = { 
+                        dateTimeStr = it 
+                        dateTimeError = it.isNotBlank() && !isValidDateTime(it)
+                    },
+                    label = { Text(Strings.dateAndTime(lang)) },
+                    placeholder = { Text("дд.мм.гггг чч:мм") },
+                    singleLine = true,
+                    isError = dateTimeError,
+                    supportingText = if (dateTimeError) {
+                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты" else "Invalid date format") }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
+                OutlinedTextField(
+                    value = durationMinutes,
+                    onValueChange = { if (it.all { c -> c.isDigit() }) durationMinutes = it },
+                    label = { Text(Strings.duration(lang)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { 
+                    val dateTime = try {
+                        val format = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+                        val date = format.parse(dateTimeStr)
+                        if (date != null) Timestamp(date) else Timestamp.now()
+                    } catch (e: Exception) {
+                        Timestamp.now()
+                    }
+                    
+                    val workoutName = if (lang == AppLanguage.RUSSIAN) "Индивидуальная тренировка" else "Individual workout"
+                    val workout = GroupWorkout(
+                        name = workoutName,
+                        description = "",
+                        trainerId = selectedTrainer?.id ?: "",
+                        trainerName = selectedTrainer?.fullName ?: "",
+                        clientId = selectedClient?.id ?: "",
+                        clientName = selectedClient?.fullName ?: "",
+                        dateTime = dateTime,
+                        durationMinutes = durationMinutes.toIntOrNull() ?: 60,
+                        maxParticipants = 1,
+                        currentParticipants = 1,
+                        isIndividual = true,
+                        active = true
+                    )
+                    onAdd(workout)
+                },
+                enabled = selectedTrainer != null && dateTimeStr.isNotBlank() && !dateTimeError && selectedClient != null
+            ) {
+                Text(Strings.create(lang))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(Strings.cancel(lang))
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
 // Диалог добавления групповой тренировки
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2105,18 +3230,36 @@ private fun AddGroupWorkoutDialog(
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var selectedTrainer by remember { mutableStateOf<Trainer?>(null) }
+    var trainerSearchQuery by remember { mutableStateOf("") }
     var dateTimeStr by remember { mutableStateOf("") }
     var durationMinutes by remember { mutableStateOf("60") }
     var maxParticipants by remember { mutableStateOf("20") }
     var showTrainerDropdown by remember { mutableStateOf(false) }
+    var dateTimeError by remember { mutableStateOf(false) }
+    
+    // Фильтрация тренеров по введённому тексту
+    val filteredTrainers = remember(trainerSearchQuery, trainers) {
+        if (trainerSearchQuery.isBlank()) {
+            trainers.take(10)
+        } else {
+            trainers.filter { 
+                it.fullName.lowercase().contains(trainerSearchQuery.lowercase()) ||
+                it.specializationsText.lowercase().contains(trainerSearchQuery.lowercase())
+            }.take(10)
+        }
+    }
     
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                text = Strings.newGroupWorkout(lang),
-                fontWeight = FontWeight.Bold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "👥", fontSize = 24.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = Strings.newGroupWorkout(lang),
+                    fontWeight = FontWeight.Bold
+                )
+            }
         },
         text = {
             Column(
@@ -2141,16 +3284,29 @@ private fun AddGroupWorkoutDialog(
                     shape = RoundedCornerShape(12.dp)
                 )
                 
-                // Выбор тренера
+                // Поиск и выбор тренера с автодополнением
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
-                        value = selectedTrainer?.fullName ?: "",
-                        onValueChange = {},
+                        value = if (selectedTrainer != null) selectedTrainer!!.fullName else trainerSearchQuery,
+                        onValueChange = { 
+                            trainerSearchQuery = it
+                            selectedTrainer = null
+                            showTrainerDropdown = true
+                        },
                         label = { Text(Strings.selectTrainer(lang)) },
-                        readOnly = true,
+                        singleLine = true,
                         trailingIcon = {
-                            IconButton(onClick = { showTrainerDropdown = !showTrainerDropdown }) {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                            if (selectedTrainer != null) {
+                                IconButton(onClick = { 
+                                    selectedTrainer = null
+                                    trainerSearchQuery = ""
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = null)
+                                }
+                            } else {
+                                IconButton(onClick = { showTrainerDropdown = !showTrainerDropdown }) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -2158,19 +3314,49 @@ private fun AddGroupWorkoutDialog(
                     )
                     
                     DropdownMenu(
-                        expanded = showTrainerDropdown,
-                        onDismissRequest = { showTrainerDropdown = false }
+                        expanded = showTrainerDropdown && filteredTrainers.isNotEmpty(),
+                        onDismissRequest = { showTrainerDropdown = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
                     ) {
-                        trainers.forEach { trainer ->
+                        filteredTrainers.forEach { trainer ->
                             DropdownMenuItem(
-                                text = { Text(trainer.fullName) },
+                                text = { 
+                                    Column {
+                                        Text(
+                                            text = trainer.fullName,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = trainer.specializationsText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                },
                                 onClick = {
                                     selectedTrainer = trainer
+                                    trainerSearchQuery = ""
                                     showTrainerDropdown = false
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(SportOrange),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = Color.White
+                                        )
+                                    }
                                 }
                             )
                         }
-                        if (trainers.isEmpty()) {
+                        if (filteredTrainers.isEmpty() && trainerSearchQuery.isNotBlank()) {
                             DropdownMenuItem(
                                 text = { Text(Strings.noTrainers(lang)) },
                                 onClick = { showTrainerDropdown = false }
@@ -2181,10 +3367,17 @@ private fun AddGroupWorkoutDialog(
                 
                 OutlinedTextField(
                     value = dateTimeStr,
-                    onValueChange = { dateTimeStr = it },
+                    onValueChange = { 
+                        dateTimeStr = it 
+                        dateTimeError = it.isNotBlank() && !isValidDateTime(it)
+                    },
                     label = { Text(Strings.dateAndTime(lang)) },
                     placeholder = { Text("дд.мм.гггг чч:мм") },
                     singleLine = true,
+                    isError = dateTimeError,
+                    supportingText = if (dateTimeError) {
+                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты и времени" else "Invalid date/time format") }
+                    } else null,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
@@ -2240,9 +3433,336 @@ private fun AddGroupWorkoutDialog(
                     )
                     onAdd(workout)
                 },
-                enabled = name.isNotBlank() && selectedTrainer != null && dateTimeStr.isNotBlank()
+                enabled = name.isNotBlank() && selectedTrainer != null && dateTimeStr.isNotBlank() && !dateTimeError
             ) {
                 Text(Strings.create(lang))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(Strings.cancel(lang))
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+// Диалог редактирования тренировки
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditWorkoutDialog(
+    workout: GroupWorkout,
+    trainers: List<Trainer>,
+    clients: List<User>,
+    onDismiss: () -> Unit,
+    onSave: (GroupWorkout) -> Unit,
+    lang: AppLanguage
+) {
+    // Инициализация с текущими данными тренировки
+    var name by remember { mutableStateOf(workout.name) }
+    var description by remember { mutableStateOf(workout.description) }
+    var selectedTrainer by remember { mutableStateOf(trainers.find { it.id == workout.trainerId }) }
+    var trainerSearchQuery by remember { mutableStateOf("") }
+    var selectedClient by remember { mutableStateOf(clients.find { it.id == workout.clientId }) }
+    var clientSearchQuery by remember { mutableStateOf("") }
+    var dateTimeStr by remember { mutableStateOf(workout.formattedDateTime) }
+    var durationMinutes by remember { mutableStateOf(workout.durationMinutes.toString()) }
+    var maxParticipants by remember { mutableStateOf(workout.maxParticipants.toString()) }
+    var showTrainerDropdown by remember { mutableStateOf(false) }
+    var showClientDropdown by remember { mutableStateOf(false) }
+    var dateTimeError by remember { mutableStateOf(false) }
+    
+    // Фильтрация тренеров по введённому тексту
+    val filteredTrainers = remember(trainerSearchQuery, trainers) {
+        if (trainerSearchQuery.isBlank()) {
+            trainers.take(10)
+        } else {
+            trainers.filter { 
+                it.fullName.lowercase().contains(trainerSearchQuery.lowercase()) ||
+                it.specializationsText.lowercase().contains(trainerSearchQuery.lowercase())
+            }.take(10)
+        }
+    }
+    
+    // Фильтрация клиентов по введённому тексту
+    val filteredClients = remember(clientSearchQuery, clients) {
+        if (clientSearchQuery.isBlank()) {
+            clients.take(10)
+        } else {
+            clients.filter { 
+                it.fullName.lowercase().contains(clientSearchQuery.lowercase()) ||
+                it.email.lowercase().contains(clientSearchQuery.lowercase())
+            }.take(10)
+        }
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (workout.isIndividualWorkout) "🏋️" else "👥",
+                    fontSize = 24.sp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "Редактировать тренировку" else "Edit Workout",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Название (только для групповых)
+                if (!workout.isIndividualWorkout) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(Strings.workoutName(lang)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text(Strings.description(lang)) },
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+                
+                // Клиент (только для индивидуальных)
+                if (workout.isIndividualWorkout) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = if (selectedClient != null) selectedClient!!.fullName else clientSearchQuery,
+                            onValueChange = { 
+                                clientSearchQuery = it
+                                selectedClient = null
+                                showClientDropdown = true
+                            },
+                            label = { Text(if (lang == AppLanguage.RUSSIAN) "ФИО клиента" else "Client name") },
+                            singleLine = true,
+                            trailingIcon = {
+                                if (selectedClient != null) {
+                                    IconButton(onClick = { 
+                                        selectedClient = null
+                                        clientSearchQuery = ""
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = null)
+                                    }
+                                } else {
+                                    IconButton(onClick = { showClientDropdown = !showClientDropdown }) {
+                                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        
+                        DropdownMenu(
+                            expanded = showClientDropdown && filteredClients.isNotEmpty(),
+                            onDismissRequest = { showClientDropdown = false },
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            filteredClients.forEach { client ->
+                                DropdownMenuItem(
+                                    text = { 
+                                        Column {
+                                            Text(
+                                                text = client.fullName,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                text = client.email,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedClient = client
+                                        clientSearchQuery = ""
+                                        showClientDropdown = false
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = client.firstName.firstOrNull()?.uppercase() ?: "?",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Выбор тренера
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (selectedTrainer != null) selectedTrainer!!.fullName else trainerSearchQuery,
+                        onValueChange = { 
+                            trainerSearchQuery = it
+                            selectedTrainer = null
+                            showTrainerDropdown = true
+                        },
+                        label = { Text(Strings.selectTrainer(lang)) },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (selectedTrainer != null) {
+                                IconButton(onClick = { 
+                                    selectedTrainer = null
+                                    trainerSearchQuery = ""
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = null)
+                                }
+                            } else {
+                                IconButton(onClick = { showTrainerDropdown = !showTrainerDropdown }) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    DropdownMenu(
+                        expanded = showTrainerDropdown && filteredTrainers.isNotEmpty(),
+                        onDismissRequest = { showTrainerDropdown = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        filteredTrainers.forEach { trainer ->
+                            DropdownMenuItem(
+                                text = { 
+                                    Column {
+                                        Text(
+                                            text = trainer.fullName,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = trainer.specializationsText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedTrainer = trainer
+                                    trainerSearchQuery = ""
+                                    showTrainerDropdown = false
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(SportOrange),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                // Дата и время
+                OutlinedTextField(
+                    value = dateTimeStr,
+                    onValueChange = { 
+                        dateTimeStr = it 
+                        dateTimeError = it.isNotBlank() && !isValidDateTime(it)
+                    },
+                    label = { Text(Strings.dateAndTime(lang)) },
+                    placeholder = { Text("дд.мм.гггг чч:мм") },
+                    singleLine = true,
+                    isError = dateTimeError,
+                    supportingText = if (dateTimeError) {
+                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты" else "Invalid date format") }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
+                // Продолжительность и макс. участники
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = durationMinutes,
+                        onValueChange = { if (it.all { c -> c.isDigit() }) durationMinutes = it },
+                        label = { Text(Strings.duration(lang)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    if (!workout.isIndividualWorkout) {
+                        OutlinedTextField(
+                            value = maxParticipants,
+                            onValueChange = { if (it.all { c -> c.isDigit() }) maxParticipants = it },
+                            label = { Text(Strings.maxParticipants(lang)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { 
+                    val dateTime = try {
+                        val format = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+                        val date = format.parse(dateTimeStr)
+                        if (date != null) Timestamp(date) else workout.dateTime
+                    } catch (e: Exception) {
+                        workout.dateTime
+                    }
+                    
+                    val updatedWorkout = workout.copy(
+                        name = if (workout.isIndividualWorkout) workout.name else name,
+                        description = if (workout.isIndividualWorkout) workout.description else description,
+                        trainerId = selectedTrainer?.id ?: workout.trainerId,
+                        trainerName = selectedTrainer?.fullName ?: workout.trainerName,
+                        clientId = if (workout.isIndividualWorkout) (selectedClient?.id ?: workout.clientId) else workout.clientId,
+                        clientName = if (workout.isIndividualWorkout) (selectedClient?.fullName ?: workout.clientName) else workout.clientName,
+                        dateTime = dateTime,
+                        durationMinutes = durationMinutes.toIntOrNull() ?: workout.durationMinutes,
+                        maxParticipants = if (workout.isIndividualWorkout) 1 else (maxParticipants.toIntOrNull() ?: workout.maxParticipants)
+                    )
+                    onSave(updatedWorkout)
+                },
+                enabled = selectedTrainer != null && dateTimeStr.isNotBlank() && !dateTimeError && 
+                    (workout.isIndividualWorkout && selectedClient != null || !workout.isIndividualWorkout && name.isNotBlank())
+            ) {
+                Text(Strings.save(lang))
             }
         },
         dismissButton = {
@@ -2266,6 +3786,7 @@ private fun EditUserDialog(
     var firstName by remember { mutableStateOf(user.firstName) }
     var middleName by remember { mutableStateOf(user.middleName) }
     var birthDateValue by remember { mutableStateOf(TextFieldValue(user.birthDate)) }
+    var birthDateError by remember { mutableStateOf(false) }
     var selectedGender by remember { mutableStateOf(user.userGender) }
     
     val roleDisplayName = when (user.userRole) {
@@ -2350,10 +3871,15 @@ private fun EditUserDialog(
                     value = birthDateValue,
                     onValueChange = { newValue ->
                         birthDateValue = formatDateInput(newValue)
+                        birthDateError = newValue.text.length == 10 && !isValidDate(newValue.text)
                     },
                     label = { Text("${Strings.birthDate(lang)} *") },
                     placeholder = { Text("ДД.ММ.ГГГГ") },
                     singleLine = true,
+                    isError = birthDateError,
+                    supportingText = if (birthDateError) {
+                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверная дата" else "Invalid date") }
+                    } else null,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Done
@@ -2396,7 +3922,7 @@ private fun EditUserDialog(
                 onClick = { 
                     onSave(lastName, firstName, middleName, birthDateValue.text, selectedGender.name)
                 },
-                enabled = lastName.isNotBlank() && firstName.isNotBlank() && birthDateValue.text.length == 10
+                enabled = lastName.isNotBlank() && firstName.isNotBlank() && birthDateValue.text.length == 10 && !birthDateError && isValidDate(birthDateValue.text)
             ) {
                 Text(Strings.save(lang))
             }

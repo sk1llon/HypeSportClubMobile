@@ -292,13 +292,14 @@ data class Trainer(
     val email: String = "",
     val phone: String = "",
     val experience: Int = 0,        // Стаж в годах
-    val specialization: String = TrainerSpecialization.FITNESS.name,
+    val specialization: String = TrainerSpecialization.FITNESS.name, // Основная специализация (для обратной совместимости)
+    val specializations: List<String> = emptyList(), // Список всех специализаций
     val achievements: List<String> = emptyList(),
     val pricePerTraining: Int = 0,  // Цена за тренировку
     val photoUrl: String = "",      // URL фото
     val createdAt: Timestamp = Timestamp.now()
 ) {
-    constructor() : this("", "", "", "", "", "", "", "", 0, TrainerSpecialization.FITNESS.name, emptyList(), 0, "", Timestamp.now())
+    constructor() : this("", "", "", "", "", "", "", "", 0, TrainerSpecialization.FITNESS.name, emptyList(), emptyList(), 0, "", Timestamp.now())
     
     val fullName: String
         get() = listOf(lastName, firstName, middleName)
@@ -308,6 +309,23 @@ data class Trainer(
     
     val trainerSpecialization: TrainerSpecialization
         get() = TrainerSpecialization.fromString(specialization)
+    
+    // Получить все специализации (учитывая обратную совместимость)
+    val allSpecializations: List<TrainerSpecialization>
+        get() {
+            val specs = if (specializations.isNotEmpty()) {
+                specializations.mapNotNull { 
+                    try { TrainerSpecialization.fromString(it) } catch (e: Exception) { null }
+                }
+            } else {
+                listOf(trainerSpecialization)
+            }
+            return specs.ifEmpty { listOf(TrainerSpecialization.FITNESS) }
+        }
+    
+    // Текст для отображения специализаций
+    val specializationsText: String
+        get() = allSpecializations.joinToString(", ") { it.displayName }
     
     val experienceText: String
         get() {
@@ -323,7 +341,7 @@ data class Trainer(
         }
 }
 
-// Модель групповой тренировки
+// Модель групповой тренировки (также используется для индивидуальных)
 data class GroupWorkout(
     @DocumentId
     val id: String = "",
@@ -331,15 +349,19 @@ data class GroupWorkout(
     val description: String = "",
     val trainerId: String = "",     // ID тренера
     val trainerName: String = "",   // ФИО тренера (для отображения)
+    val clientId: String = "",      // ID клиента (для индивидуальных тренировок)
+    val clientName: String = "",    // ФИО клиента (для индивидуальных тренировок)
     val dateTime: Timestamp = Timestamp.now(),
     val durationMinutes: Int = 60,
     val maxParticipants: Int = 20,
     val currentParticipants: Int = 0,
+    val participantIds: List<String> = emptyList(), // Список ID участников групповой тренировки
+    val isIndividual: Boolean = false, // Флаг индивидуальной тренировки
     @get:PropertyName("active")
     @set:PropertyName("active")
     var active: Boolean = true
 ) {
-    constructor() : this("", "", "", "", "", Timestamp.now(), 60, 20, 0, true)
+    constructor() : this("", "", "", "", "", "", "", Timestamp.now(), 60, 20, 0, emptyList(), false, true)
     
     val formattedDateTime: String
         get() {
@@ -350,4 +372,11 @@ data class GroupWorkout(
     
     val isFull: Boolean
         get() = currentParticipants >= maxParticipants
+    
+    // Вычисляемое свойство: определяет индивидуальную тренировку по флагу или по признакам
+    val isIndividualWorkout: Boolean
+        get() = isIndividual || (maxParticipants == 1 && clientName.isNotBlank())
+    
+    // Проверка, записан ли пользователь на тренировку
+    fun isUserSignedUp(userId: String): Boolean = participantIds.contains(userId)
 }

@@ -3,72 +3,84 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Функция проверки авторизации
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+    
+    // Проверка авторизации пользователя
     function isAuthenticated() {
       return request.auth != null;
     }
     
-    // Функция проверки, является ли пользователь владельцем документа
+    // Проверка, является ли пользователь владельцем документа
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Функция проверки роли пользователя
+    // Получение роли текущего пользователя из базы данных
     function getUserRole() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
     
-    // Функция проверки, является ли пользователь админом
+    // Проверка роли администратора
     function isAdmin() {
       return isAuthenticated() && getUserRole() == 'ADMIN';
     }
     
-    // Функция проверки, является ли пользователь тренером
+    // Проверка роли тренера
     function isTrainer() {
       return isAuthenticated() && getUserRole() == 'TRAINER';
     }
     
-    // Функция проверки, является ли пользователь клиентом
+    // Проверка роли клиента
     function isClient() {
       return isAuthenticated() && getUserRole() == 'CLIENT';
     }
     
-    // ==================== USERS ====================
-    // Коллекция пользователей
+    // Проверка, является ли пользователь админом или тренером
+    function isStaff() {
+      return isAdmin() || isTrainer();
+    }
+    
+    // Проверка, что клиент только записывается или отменяет запись на тренировку
+    // (изменяет только participantIds и currentParticipants)
+    function isSignUpOrCancelUpdate() {
+      let allowedFields = ['participantIds', 'currentParticipants'];
+      let changedFields = request.resource.data.diff(resource.data).affectedKeys();
+      return changedFields.hasOnly(allowedFields);
+    }
+    
+    // ==================== ПОЛЬЗОВАТЕЛИ (users) ====================
     match /users/{userId} {
-      // Чтение: пользователь может читать свои данные, админ - все данные
+      // Чтение: собственный профиль, админ или тренер (для списка клиентов)
       allow read: if isOwner(userId) || isAdmin() || isTrainer();
       
-      // Создание: только при регистрации (auth.uid должен совпадать с userId)
+      // Создание: при регистрации (uid совпадает) или админ создаёт пользователя
       allow create: if isOwner(userId) || isAdmin();
       
-      // Обновление: пользователь может обновлять свои данные, админ - любые
+      // Обновление: собственный профиль или админ
       allow update: if isOwner(userId) || isAdmin();
       
       // Удаление: только админ
       allow delete: if isAdmin();
     }
     
-    // ==================== SUBSCRIPTIONS ====================
-    // Коллекция шаблонов абонементов
+    // ==================== ШАБЛОНЫ АБОНЕМЕНТОВ (subscriptions) ====================
     match /subscriptions/{subscriptionId} {
-      // Чтение: все авторизованные пользователи
+      // Чтение: все авторизованные пользователи (для отображения списка абонементов)
       allow read: if isAuthenticated();
       
       // Создание, обновление, удаление: только админ
       allow create, update, delete: if isAdmin();
     }
     
-    // ==================== USER_SUBSCRIPTIONS ====================
-    // Коллекция купленных абонементов пользователей
+    // ==================== КУПЛЕННЫЕ АБОНЕМЕНТЫ (user_subscriptions) ====================
     match /user_subscriptions/{subscriptionId} {
-      // Чтение: владелец подписки или админ
+      // Чтение: владелец абонемента или админ
       allow read: if isAuthenticated() && 
         (resource.data.userId == request.auth.uid || isAdmin());
       
-      // Создание: авторизованный пользователь может создать подписку для себя
+      // Создание: пользователь может купить абонемент для себя, или админ
       allow create: if isAuthenticated() && 
-        request.resource.data.userId == request.auth.uid;
+        (request.resource.data.userId == request.auth.uid || isAdmin());
       
       // Обновление: владелец или админ
       allow update: if isAuthenticated() && 
@@ -78,48 +90,98 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
-    // ==================== TRAINERS ====================
-    // Коллекция тренеров
+    // ==================== ТРЕНЕРЫ (trainers) ====================
     match /trainers/{trainerId} {
-      // Чтение: все авторизованные пользователи
+      // Чтение: все авторизованные пользователи (для отображения списка тренеров)
       allow read: if isAuthenticated();
       
       // Создание, обновление, удаление: только админ
       allow create, update, delete: if isAdmin();
     }
     
-    // ==================== GROUP_WORKOUTS ====================
-    // Коллекция групповых тренировок
+    // ==================== ТРЕНИРОВКИ (group_workouts) ====================
+    // Включает как групповые, так и индивидуальные тренировки
     match /group_workouts/{workoutId} {
       // Чтение: все авторизованные пользователи
       allow read: if isAuthenticated();
       
-      // Создание, обновление: админ или тренер
-      allow create, update: if isAdmin() || isTrainer();
+      // Создание: админ или тренер
+      allow create: if isStaff();
+      
+      // Обновление: админ, тренер (своих тренировок) или клиент (запись/отмена записи на тренировку)
+      allow update: if isAdmin() || 
+        (isTrainer() && resource.data.trainerId == request.auth.uid) ||
+        // Клиент может обновить свою индивидуальную тренировку
+        (isClient() && resource.data.clientId == request.auth.uid) ||
+        // Клиент может записаться на групповую тренировку (добавить/удалить себя из participantIds)
+        (isClient() && isSignUpOrCancelUpdate());
       
       // Удаление: только админ
       allow delete: if isAdmin();
     }
     
-    // ==================== WORKOUT_REGISTRATIONS ====================
-    // Коллекция записей на тренировки (для будущего использования)
+    // ==================== ЗАПИСИ НА ТРЕНИРОВКИ (workout_registrations) ====================
     match /workout_registrations/{registrationId} {
-      // Чтение: владелец записи, тренер или админ
+      // Чтение: владелец записи, тренер тренировки или админ
       allow read: if isAuthenticated() && 
-        (resource.data.userId == request.auth.uid || isTrainer() || isAdmin());
+        (resource.data.userId == request.auth.uid || isStaff());
       
-      // Создание: клиент может записаться на тренировку
+      // Создание: клиент записывается сам или админ/тренер записывает клиента
+      allow create: if isAuthenticated() && 
+        (request.resource.data.userId == request.auth.uid || isStaff());
+      
+      // Обновление: владелец записи, тренер или админ
+      allow update: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isStaff());
+      
+      // Удаление: владелец записи (отмена), тренер или админ
+      allow delete: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isStaff());
+    }
+    
+    // ==================== ОТЗЫВЫ (reviews) ====================
+    match /reviews/{reviewId} {
+      // Чтение: все авторизованные пользователи
+      allow read: if isAuthenticated();
+      
+      // Создание: авторизованный пользователь может оставить отзыв
       allow create: if isAuthenticated() && 
         request.resource.data.userId == request.auth.uid;
       
-      // Обновление: владелец, тренер или админ
+      // Обновление: автор отзыва или админ
       allow update: if isAuthenticated() && 
-        (resource.data.userId == request.auth.uid || isTrainer() || isAdmin());
+        (resource.data.userId == request.auth.uid || isAdmin());
       
-      // Удаление: владелец или админ
+      // Удаление: автор отзыва или админ
       allow delete: if isAuthenticated() && 
         (resource.data.userId == request.auth.uid || isAdmin());
     }
+    
+    // ==================== УВЕДОМЛЕНИЯ (notifications) ====================
+    match /notifications/{notificationId} {
+      // Чтение: получатель уведомления или админ
+      allow read: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Создание: админ или система (тренер для своих клиентов)
+      allow create: if isStaff();
+      
+      // Обновление: получатель (отметка прочитанным) или админ
+      allow update: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Удаление: получатель или админ
+      allow delete: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+    }
+    
+    // ==================== НАСТРОЙКИ ПРИЛОЖЕНИЯ (app_settings) ====================
+    match /app_settings/{settingId} {
+      // Чтение: все авторизованные пользователи
+      allow read: if isAuthenticated();
+      
+      // Запись: только админ
+      allow write: if isAdmin();
+    }
   }
 }
-

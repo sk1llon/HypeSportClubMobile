@@ -777,5 +777,306 @@ object Strings {
         AppLanguage.RUSSIAN -> "/тренировка"
         AppLanguage.ENGLISH -> "/training"
     }
+    
+    // Client main menu
+    fun welcome(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Добро пожаловать!"
+        AppLanguage.ENGLISH -> "Welcome!"
+    }
+    
+    fun useNavigation(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Используйте меню навигации для доступа к функциям приложения"
+        AppLanguage.ENGLISH -> "Use the navigation menu to access app features"
+    }
+    
+    fun loadingData(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Загрузка данных..."
+        AppLanguage.ENGLISH -> "Loading data..."
+    }
+    
+    fun macroCalculator(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "БЖУ Калькулятор"
+        AppLanguage.ENGLISH -> "Macro Calculator"
+    }
+    
+    fun sectionInDevelopment(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Раздел в разработке"
+        AppLanguage.ENGLISH -> "Section in development"
+    }
+    
+    fun subscriptionOrdered(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Абонемент успешно оформлен!"
+        AppLanguage.ENGLISH -> "Subscription successfully ordered!"
+    }
+    
+    fun orderSubscription(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Оформить абонемент?"
+        AppLanguage.ENGLISH -> "Order subscription?"
+    }
+    
+    fun cost(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Стоимость"
+        AppLanguage.ENGLISH -> "Cost"
+    }
+    
+    fun validityPeriod(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Срок действия"
+        AppLanguage.ENGLISH -> "Validity period"
+    }
+    
+    fun days(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "дней"
+        AppLanguage.ENGLISH -> "days"
+    }
+    
+    fun order(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Оформить"
+        AppLanguage.ENGLISH -> "Order"
+    }
+    
+    fun user(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Пользователь"
+        AppLanguage.ENGLISH -> "User"
+    }
+    
+    fun phoneEmailPassword(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Телефон, почта, пароль"
+        AppLanguage.ENGLISH -> "Phone, email, password"
+    }
+    
+    fun genderWeightHeightGoal(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Пол, вес, рост, цель"
+        AppLanguage.ENGLISH -> "Gender, weight, height, goal"
+    }
+    
+    fun currentAndAvailable(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Текущие и доступные"
+        AppLanguage.ENGLISH -> "Current and available"
+    }
+    
+    fun clubTrainersList(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Список тренеров клуба"
+        AppLanguage.ENGLISH -> "Club trainers list"
+    }
+    
+    fun themeLanguage(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Тема, язык"
+        AppLanguage.ENGLISH -> "Theme, language"
+    }
+    
+    fun fullName(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "ФИО"
+        AppLanguage.ENGLISH -> "Full name"
+    }
+    
+    fun change(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Изменить"
+        AppLanguage.ENGLISH -> "Change"
+    }
+    
+    fun saved(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Сохранено"
+        AppLanguage.ENGLISH -> "Saved"
+    }
+    
+    fun saveChanges(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Сохранить изменения"
+        AppLanguage.ENGLISH -> "Save changes"
+    }
+    
+    fun changePassword(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Изменить пароль"
+        AppLanguage.ENGLISH -> "Change password"
+    }
+    
+    fun currentPassword(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Текущий пароль"
+        AppLanguage.ENGLISH -> "Current password"
+    }
+    
+    fun newPassword(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Новый пароль"
+        AppLanguage.ENGLISH -> "New password"
+    }
+    
+    fun confirmPassword(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Подтвердите пароль"
+        AppLanguage.ENGLISH -> "Confirm password"
+    }
+    
+    fun passwordMinLength(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Пароль должен быть не менее 6 символов"
+        AppLanguage.ENGLISH -> "Password must be at least 6 characters"
+    }
+    
+    fun passwordsNotMatch(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Пароли не совпадают"
+        AppLanguage.ENGLISH -> "Passwords don't match"
+    }
+    
+    fun weightKg(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Вес (кг)"
+        AppLanguage.ENGLISH -> "Weight (kg)"
+    }
+    
+    fun heightCm(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Рост (см)"
+        AppLanguage.ENGLISH -> "Height (cm)"
+    }
+    
+    fun bmiDescription(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "ИМТ (Индекс массы тела)"
+        AppLanguage.ENGLISH -> "BMI (Body Mass Index)"
+    }
+    
+    fun underweight(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Недостаточный вес"
+        AppLanguage.ENGLISH -> "Underweight"
+    }
+    
+    fun normalWeight(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Норма"
+        AppLanguage.ENGLISH -> "Normal"
+    }
+    
+    fun overweight(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Избыточный вес"
+        AppLanguage.ENGLISH -> "Overweight"
+    }
+    
+    fun obesity(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Ожирение"
+        AppLanguage.ENGLISH -> "Obesity"
+    }
+    
+    fun chooseSubscription(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Выберите абонемент"
+        AppLanguage.ENGLISH -> "Choose a subscription"
+    }
+    
+    fun yourActiveSubscriptions(lang: AppLanguage, count: Int) = when (lang) {
+        AppLanguage.RUSSIAN -> "Ваши активные подписки ($count)"
+        AppLanguage.ENGLISH -> "Your active subscriptions ($count)"
+    }
+    
+    fun noActiveSubscriptions(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "У вас пока нет активных абонементов"
+        AppLanguage.ENGLISH -> "You don't have active subscriptions yet"
+    }
+    
+    fun extendOrAddNew(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Продлите или добавьте новые"
+        AppLanguage.ENGLISH -> "Extend or add new ones"
+    }
+    
+    // Admin workouts management
+    fun workoutsManagement(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Управление тренировками"
+        AppLanguage.ENGLISH -> "Workouts Management"
+    }
+    
+    fun selectDate(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Выберите дату"
+        AppLanguage.ENGLISH -> "Select date"
+    }
+    
+    fun allTrainers(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Все тренеры"
+        AppLanguage.ENGLISH -> "All trainers"
+    }
+    
+    fun workoutsForDate(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Тренировки на"
+        AppLanguage.ENGLISH -> "Workouts for"
+    }
+    
+    fun noWorkoutsForDate(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "На выбранную дату нет тренировок"
+        AppLanguage.ENGLISH -> "No workouts for selected date"
+    }
+    
+    fun addWorkout(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Добавить тренировку"
+        AppLanguage.ENGLISH -> "Add workout"
+    }
+    
+    fun individualWorkout(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Индивидуальная"
+        AppLanguage.ENGLISH -> "Individual"
+    }
+    
+    fun groupWorkout(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Групповая"
+        AppLanguage.ENGLISH -> "Group"
+    }
+    
+    fun today(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Сегодня"
+        AppLanguage.ENGLISH -> "Today"
+    }
+    
+    fun mondayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Пн"
+        AppLanguage.ENGLISH -> "Mon"
+    }
+    
+    fun tuesdayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Вт"
+        AppLanguage.ENGLISH -> "Tue"
+    }
+    
+    fun wednesdayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Ср"
+        AppLanguage.ENGLISH -> "Wed"
+    }
+    
+    fun thursdayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Чт"
+        AppLanguage.ENGLISH -> "Thu"
+    }
+    
+    fun fridayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Пт"
+        AppLanguage.ENGLISH -> "Fri"
+    }
+    
+    fun saturdayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Сб"
+        AppLanguage.ENGLISH -> "Sat"
+    }
+    
+    fun sundayShort(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Вс"
+        AppLanguage.ENGLISH -> "Sun"
+    }
+    
+    fun getDayOfWeekShort(dayOfWeek: Int, lang: AppLanguage): String {
+        return when (dayOfWeek) {
+            java.util.Calendar.MONDAY -> mondayShort(lang)
+            java.util.Calendar.TUESDAY -> tuesdayShort(lang)
+            java.util.Calendar.WEDNESDAY -> wednesdayShort(lang)
+            java.util.Calendar.THURSDAY -> thursdayShort(lang)
+            java.util.Calendar.FRIDAY -> fridayShort(lang)
+            java.util.Calendar.SATURDAY -> saturdayShort(lang)
+            java.util.Calendar.SUNDAY -> sundayShort(lang)
+            else -> ""
+        }
+    }
+    
+    fun getDaysText(days: Int, lang: AppLanguage): String {
+        return when (lang) {
+            AppLanguage.ENGLISH -> if (days == 1) "day" else "days"
+            AppLanguage.RUSSIAN -> {
+                val lastDigit = days % 10
+                val lastTwoDigits = days % 100
+                when {
+                    lastTwoDigits in 11..14 -> "дней"
+                    lastDigit == 1 -> "день"
+                    lastDigit in 2..4 -> "дня"
+                    else -> "дней"
+                }
+            }
+        }
+    }
 }
 

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -85,14 +86,14 @@ enum class ProfileSection {
     }
 }
 
-// Типы тренировок
+// Типы тренировок (для клиента)
 enum class WorkoutType {
-    INDIVIDUAL,
+    MY_WORKOUTS,
     GROUP;
     
     fun getTitle(lang: AppLanguage): String = when (this) {
-        INDIVIDUAL -> Strings.individual(lang)
-        GROUP -> Strings.group(lang)
+        MY_WORKOUTS -> if (lang == AppLanguage.RUSSIAN) "Мои тренировки" else "My Workouts"
+        GROUP -> if (lang == AppLanguage.RUSSIAN) "Групповые тренировки" else "Group Workouts"
     }
 }
 
@@ -119,6 +120,7 @@ fun SubscriptionsScreen(
     var showPurchaseDialog by remember { mutableStateOf<Subscription?>(null) }
     var isPurchasing by remember { mutableStateOf(false) }
     var showSuccessMessage by remember { mutableStateOf(false) }
+    var showWorkoutSignUpSuccess by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var selectedNavItem by remember { mutableStateOf(ClientNavItem.HOME) }
     var trainersList by remember { mutableStateOf<List<Trainer>>(emptyList()) }
@@ -127,8 +129,8 @@ fun SubscriptionsScreen(
     // Текущий раздел профиля (null = главное меню профиля)
     var currentProfileSection by remember { mutableStateOf<ProfileSection?>(null) }
     
-    // Тип тренировок (для раздела Тренировки) - по умолчанию индивидуальные
-    var selectedWorkoutType by remember { mutableStateOf(WorkoutType.INDIVIDUAL) }
+    // Тип тренировок (для раздела Тренировки) - по умолчанию мои тренировки
+    var selectedWorkoutType by remember { mutableStateOf(WorkoutType.MY_WORKOUTS) }
     
     // Загрузка данных
     LaunchedEffect(Unit) {
@@ -342,11 +344,52 @@ fun SubscriptionsScreen(
                             
                             // Контент в зависимости от выбранного типа
                             when (selectedWorkoutType) {
-                                WorkoutType.INDIVIDUAL -> {
-                                    IndividualWorkoutsScreen(trainers = trainersList)
+                                WorkoutType.MY_WORKOUTS -> {
+                                    MyWorkoutsScreen(
+                                        currentUserId = currentUser?.id ?: "",
+                                        allWorkouts = groupWorkouts,
+                                        lang = lang
+                                    )
                                 }
                                 WorkoutType.GROUP -> {
-                                    GroupWorkoutsScreen(workouts = groupWorkouts)
+                                    // Показываем только групповые тренировки (не индивидуальные)
+                                    val onlyGroupWorkouts = groupWorkouts.filter { !it.isIndividualWorkout }
+                                    GroupWorkoutsScreen(
+                                        workouts = onlyGroupWorkouts,
+                                        currentUserId = currentUser?.id ?: "",
+                                        lang = lang,
+                                        onSignUp = { workout ->
+                                            scope.launch {
+                                                val result = repository.signUpForWorkout(workout.id, currentUser?.id ?: "")
+                                                result.fold(
+                                                    onSuccess = {
+                                                        // Перезагружаем список тренировок
+                                                        groupWorkouts = repository.getAllGroupWorkouts()
+                                                        showWorkoutSignUpSuccess = true
+                                                        delay(3000)
+                                                        showWorkoutSignUpSuccess = false
+                                                    },
+                                                    onFailure = { e ->
+                                                        errorMessage = e.message
+                                                    }
+                                                )
+                                            }
+                                        },
+                                        onCancelSignUp = { workout ->
+                                            scope.launch {
+                                                val result = repository.cancelWorkoutSignUp(workout.id, currentUser?.id ?: "")
+                                                result.fold(
+                                                    onSuccess = {
+                                                        // Перезагружаем список тренировок
+                                                        groupWorkouts = repository.getAllGroupWorkouts()
+                                                    },
+                                                    onFailure = { e ->
+                                                        errorMessage = e.message
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -366,7 +409,8 @@ fun SubscriptionsScreen(
                                     onLogoutClick = {
                                         repository.logout()
                                         onLogout()
-                                    }
+                                    },
+                                    lang = lang
                                 )
                             }
                             ProfileSection.PERSONAL_INFO -> {
@@ -410,7 +454,7 @@ fun SubscriptionsScreen(
                 }
             }
             
-            // Сообщение об успешной покупке
+            // Сообщение об успешной покупке абонемента
             AnimatedVisibility(
                 visible = showSuccessMessage,
                 enter = slideInVertically() + fadeIn(),
@@ -436,7 +480,41 @@ fun SubscriptionsScreen(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Абонемент успешно оформлен!",
+                            text = if (lang == AppLanguage.RUSSIAN) "Абонемент успешно оформлен!" else "Subscription purchased successfully!",
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+            
+            // Сообщение об успешной записи на тренировку
+            AnimatedVisibility(
+                visible = showWorkoutSignUpSuccess,
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = SportOrange
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (lang == AppLanguage.RUSSIAN) "Вы записаны на тренировку!" else "You signed up for workout!",
                             color = Color.White,
                             fontWeight = FontWeight.Medium
                         )
@@ -1037,7 +1115,8 @@ private fun ProfileContent(
     onSubscriptionsClick: () -> Unit,
     onTrainersClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onLogoutClick: () -> Unit
+    onLogoutClick: () -> Unit,
+    lang: AppLanguage
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1076,7 +1155,7 @@ private fun ProfileContent(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = user?.fullName ?: "Пользователь",
+                        text = user?.fullName ?: Strings.user(lang),
                         style = MaterialTheme.typography.headlineSmall.copy(
                             fontWeight = FontWeight.Bold
                         )
@@ -1089,8 +1168,8 @@ private fun ProfileContent(
         item {
             ProfileMenuButton(
                 icon = "👤",
-                title = "Личные данные",
-                subtitle = "Телефон, почта, пароль",
+                title = Strings.personalData(lang),
+                subtitle = Strings.phoneEmailPassword(lang),
                 onClick = onPersonalInfoClick
             )
         }
@@ -1099,8 +1178,8 @@ private fun ProfileContent(
         item {
             ProfileMenuButton(
                 icon = "📊",
-                title = "Данные для БЖУ",
-                subtitle = "Пол, вес, рост, цель",
+                title = Strings.healthData(lang),
+                subtitle = Strings.genderWeightHeightGoal(lang),
                 onClick = onHealthDataClick
             )
         }
@@ -1109,8 +1188,8 @@ private fun ProfileContent(
         item {
             ProfileMenuButton(
                 icon = "🎫",
-                title = "Абонементы",
-                subtitle = "Текущие и доступные",
+                title = Strings.subscriptions(lang),
+                subtitle = Strings.currentAndAvailable(lang),
                 onClick = onSubscriptionsClick
             )
         }
@@ -1119,8 +1198,8 @@ private fun ProfileContent(
         item {
             ProfileMenuButton(
                 icon = "🏃",
-                title = "Тренеры",
-                subtitle = "Список тренеров клуба",
+                title = Strings.trainers(lang),
+                subtitle = Strings.clubTrainersList(lang),
                 onClick = onTrainersClick
             )
         }
@@ -1129,8 +1208,8 @@ private fun ProfileContent(
         item {
             ProfileMenuButton(
                 icon = "⚙️",
-                title = "Настройки",
-                subtitle = "Тема, язык",
+                title = Strings.settings(lang),
+                subtitle = Strings.themeLanguage(lang),
                 onClick = onSettingsClick
             )
         }
@@ -1158,7 +1237,7 @@ private fun ProfileContent(
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = "Выйти из аккаунта",
+                        text = Strings.logout(lang),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Medium
                         ),
@@ -1903,7 +1982,7 @@ private fun WorkoutTypeToggle(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (type == WorkoutType.INDIVIDUAL) "🏋️" else "👥",
+                            text = if (type == WorkoutType.MY_WORKOUTS) "📋" else "👥",
                             fontSize = 18.sp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -2005,8 +2084,139 @@ private fun IndividualWorkoutsScreen(trainers: List<Trainer>) {
     }
 }
 
+// Экран "Мои тренировки" - показывает тренировки пользователя (индивидуальные + записанные групповые)
 @Composable
-private fun GroupWorkoutsScreen(workouts: List<GroupWorkout>) {
+private fun MyWorkoutsScreen(
+    currentUserId: String,
+    allWorkouts: List<GroupWorkout>,
+    lang: AppLanguage
+) {
+    // Фильтруем тренировки: индивидуальные для этого клиента + групповые, на которые записан
+    val myWorkouts = remember(allWorkouts, currentUserId) {
+        allWorkouts.filter { workout ->
+            // Индивидуальная тренировка для этого клиента
+            (workout.isIndividualWorkout && workout.clientId == currentUserId) ||
+            // Или групповая тренировка, на которую пользователь записан
+            (!workout.isIndividualWorkout && workout.isUserSignedUp(currentUserId))
+        }.sortedBy { it.dateTime }
+    }
+    
+    if (myWorkouts.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Text(text = "📋", fontSize = 64.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "У вас пока нет тренировок" else "You don't have workouts yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) 
+                        "Запишитесь на групповую тренировку или обратитесь к тренеру для индивидуального занятия" 
+                    else 
+                        "Sign up for a group workout or contact a trainer for an individual session",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(myWorkouts) { workout ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = SportOrange.copy(alpha = 0.15f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Иконка типа тренировки
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(SportOrange),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (workout.isIndividualWorkout) "🏋️" else "👥",
+                                    fontSize = 24.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                // Заголовок: для индивидуальных "Индивидуальная тренировка", для групповых "Групповая - название"
+                                val displayTitle = if (workout.isIndividualWorkout) {
+                                    if (lang == AppLanguage.RUSSIAN) "Индивидуальная тренировка" else "Individual workout"
+                                } else {
+                                    "${if (lang == AppLanguage.RUSSIAN) "Групповая" else "Group"} - ${workout.name}"
+                                }
+                                Text(
+                                    text = displayTitle,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row {
+                            Text(
+                                text = "📅 ${workout.formattedDateTime}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row {
+                            Text(
+                                text = "👤 ${workout.trainerName}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "⏱ ${workout.durationMinutes} ${if (lang == AppLanguage.RUSSIAN) "мин" else "min"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+            item { Spacer(modifier = Modifier.height(32.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun GroupWorkoutsScreen(
+    workouts: List<GroupWorkout>,
+    currentUserId: String,
+    lang: AppLanguage,
+    onSignUp: (GroupWorkout) -> Unit,
+    onCancelSignUp: (GroupWorkout) -> Unit
+) {
     if (workouts.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -2016,13 +2226,13 @@ private fun GroupWorkoutsScreen(workouts: List<GroupWorkout>) {
                 Text(text = "👥", fontSize = 64.sp)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Групповых тренировок пока нет",
+                    text = if (lang == AppLanguage.RUSSIAN) "Групповых тренировок пока нет" else "No group workouts yet",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Следите за расписанием",
+                    text = if (lang == AppLanguage.RUSSIAN) "Следите за расписанием" else "Follow the schedule",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2074,7 +2284,7 @@ private fun GroupWorkoutsScreen(workouts: List<GroupWorkout>) {
                                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
                                 ) {
                                     Text(
-                                        text = "Мест нет",
+                                        text = if (lang == AppLanguage.RUSSIAN) "Мест нет" else "Full",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.error,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -2104,7 +2314,7 @@ private fun GroupWorkoutsScreen(workouts: List<GroupWorkout>) {
                                 Text(text = "⏱️", fontSize = 16.sp)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "${workout.durationMinutes} мин",
+                                    text = "${workout.durationMinutes} ${if (lang == AppLanguage.RUSSIAN) "мин" else "min"}",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -2116,19 +2326,61 @@ private fun GroupWorkoutsScreen(workouts: List<GroupWorkout>) {
                             Text(text = "👤", fontSize = 16.sp)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Тренер: ${workout.trainerName}",
+                                text = "${if (lang == AppLanguage.RUSSIAN) "Тренер" else "Trainer"}: ${workout.trainerName}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                         
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         
-                        Text(
-                            text = "Участников: ${workout.currentParticipants}/${workout.maxParticipants}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${if (lang == AppLanguage.RUSSIAN) "Участников" else "Participants"}: ${workout.currentParticipants}/${workout.maxParticipants}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            
+                            // Кнопка записи/отмены записи на тренировку
+                            val isUserSignedUp = workout.isUserSignedUp(currentUserId)
+                            
+                            if (isUserSignedUp) {
+                                // Пользователь уже записан - показываем кнопку отмены
+                                OutlinedButton(
+                                    onClick = { onCancelSignUp(workout) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    ),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = if (lang == AppLanguage.RUSSIAN) "Отменить" else "Cancel",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            } else if (!workout.isFull) {
+                                // Пользователь не записан и есть места - показываем кнопку записи
+                                Button(
+                                    onClick = { onSignUp(workout) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = SportOrange
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = if (lang == AppLanguage.RUSSIAN) "Записаться" else "Sign up",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
