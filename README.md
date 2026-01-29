@@ -1,10 +1,6 @@
 # HypeSportClub Mobile
 
 <p align="center">
-  <img src="app/src/main/res/drawable/ic_launcher_foreground.xml" width="120" height="120" alt="HypeSportClub Logo">
-</p>
-
-<p align="center">
   <b>Мобильное приложение для управления фитнес-клубом</b>
 </p>
 
