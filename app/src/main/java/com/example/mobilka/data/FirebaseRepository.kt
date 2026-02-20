@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.Timestamp
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
@@ -24,6 +25,7 @@ class FirebaseRepository {
     private val userSubscriptionsCollection = firestore.collection("user_subscriptions")
     private val trainersCollection = firestore.collection("trainers")
     private val groupWorkoutsCollection = firestore.collection("group_workouts")
+    private val trainerAvailabilityCollection = firestore.collection("trainer_availability")
     
     // Текущий пользователь Firebase
     val currentFirebaseUser: FirebaseUser?
@@ -33,80 +35,6 @@ class FirebaseRepository {
         get() = auth.currentUser != null
 
     // ==================== АУТЕНТИФИКАЦИЯ ====================
-    
-    companion object {
-        const val ADMIN_EMAIL = "admin@mail.ru"
-        const val ADMIN_PASSWORD = "admin1"
-    }
-    
-    // Создание/проверка админа при первом запуске
-    suspend fun ensureAdminExists(): Result<Unit> {
-        return try {
-            // Проверяем, существует ли админ в Firestore
-            try {
-                val adminQuery = usersCollection
-                    .whereEqualTo("email", ADMIN_EMAIL)
-                    .get()
-                    .await()
-                
-                // Если админ уже есть в Firestore - всё ок
-                if (adminQuery.documents.isNotEmpty()) {
-                    return Result.success(Unit)
-                }
-            } catch (e: Exception) {
-                // Игнорируем ошибки проверки
-                e.printStackTrace()
-            }
-            
-            // Пытаемся создать админа в Auth
-            try {
-                val result = auth.createUserWithEmailAndPassword(ADMIN_EMAIL, ADMIN_PASSWORD).await()
-                val user = result.user ?: return Result.success(Unit)
-                
-                // Создаём запись в Firestore
-                try {
-                    val adminData = hashMapOf(
-                        "email" to ADMIN_EMAIL,
-                        "phone" to "",
-                        "lastName" to "",
-                        "firstName" to "Администратор",
-                        "middleName" to "",
-                        "birthDate" to "",
-                        "role" to UserRole.ADMIN.name,
-                        "createdAt" to Timestamp.now()
-                    )
-                    usersCollection.document(user.uid).set(adminData).await()
-                } catch (e: Exception) {
-                    // Игнорируем ошибки записи в Firestore
-                    e.printStackTrace()
-                }
-                
-                // Выходим, чтобы не оставаться залогиненным как админ
-                try {
-                    auth.signOut()
-                } catch (e: Exception) {
-                    // Игнорируем ошибки выхода
-                }
-                
-                Result.success(Unit)
-            } catch (e: Exception) {
-                // Если админ уже существует в Auth - это нормально
-                if (e.message?.contains("email address is already in use") == true ||
-                    e.message?.contains("already in use") == true) {
-                    // Админ уже существует, просто возвращаем успех
-                    Result.success(Unit)
-                } else {
-                    // Другая ошибка - логируем, но не критично
-                    e.printStackTrace()
-                    Result.success(Unit)
-                }
-            }
-        } catch (e: Exception) {
-            // Любые ошибки игнорируем - не критично для работы приложения
-            e.printStackTrace()
-            Result.success(Unit)
-        }
-    }
     
     suspend fun register(
         email: String, 
@@ -513,6 +441,327 @@ class FirebaseRepository {
         }
     }
     
+    // ==================== РАСПИСАНИЕ ТРЕНЕРА ====================
+    
+    // Получить расписание тренера
+    suspend fun getTrainerAvailability(trainerId: String): List<TrainerAvailability> {
+        return try {
+            val snapshot = trainerAvailabilityCollection
+                .whereEqualTo("trainerId", trainerId)
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { it.toObject(TrainerAvailability::class.java) }
+                .sortedBy { it.date }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+    
+    // Получить расписание тренера на определённую дату
+    suspend fun getTrainerAvailabilityByDate(trainerId: String, date: Timestamp): List<TrainerAvailability> {
+        return try {
+            // Создаём диапазон для дня
+            val calendar = Calendar.getInstance().apply {
+                time = date.toDate()
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val startOfDay = Timestamp(calendar.time)
+            
+            calendar.add(Calendar.DAY_OF_MONTH, 1)
+            val endOfDay = Timestamp(calendar.time)
+            
+            val snapshot = trainerAvailabilityCollection
+                .whereEqualTo("trainerId", trainerId)
+                .whereGreaterThanOrEqualTo("date", startOfDay)
+                .whereLessThan("date", endOfDay)
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { it.toObject(TrainerAvailability::class.java) }
+                .sortedBy { it.startTime }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+    
+    // Добавить слот расписания
+    suspend fun addTrainerAvailability(availability: TrainerAvailability): Result<String> {
+        return try {
+            val data = hashMapOf(
+                "trainerId" to availability.trainerId,
+                "trainerName" to availability.trainerName,
+                "date" to availability.date,
+                "startTime" to availability.startTime,
+                "endTime" to availability.endTime,
+                "isAvailable" to availability.isAvailable
+            )
+            val docRef = trainerAvailabilityCollection.add(data).await()
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Обновить слот расписания
+    suspend fun updateTrainerAvailability(availability: TrainerAvailability): Result<Unit> {
+        return try {
+            val data = hashMapOf(
+                "trainerId" to availability.trainerId,
+                "trainerName" to availability.trainerName,
+                "date" to availability.date,
+                "startTime" to availability.startTime,
+                "endTime" to availability.endTime,
+                "isAvailable" to availability.isAvailable
+            )
+            trainerAvailabilityCollection.document(availability.id).update(data as Map<String, Any>).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Удалить слот расписания
+    suspend fun deleteTrainerAvailability(availabilityId: String): Result<Unit> {
+        return try {
+            trainerAvailabilityCollection.document(availabilityId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // ==================== ЧАТЫ ====================
+    
+    private val chatMessagesCollection = firestore.collection("chats")
+    
+    // Отправить сообщение
+    suspend fun sendMessage(chatId: String, senderId: String, senderName: String, text: String): Result<String> {
+        return try {
+            val data = hashMapOf(
+                "chatId" to chatId,
+                "senderId" to senderId,
+                "senderName" to senderName,
+                "text" to text,
+                "timestamp" to Timestamp.now(),
+                "isRead" to false
+            )
+            val docRef = chatMessagesCollection.add(data).await()
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Получить сообщения чата
+    suspend fun getChatMessages(chatId: String): List<ChatMessage> {
+        return try {
+            val snapshot = chatMessagesCollection
+                .whereEqualTo("chatId", chatId)
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { it.toObject(ChatMessage::class.java) }
+                .sortedBy { it.timestamp }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+    
+    // Слушать сообщения чата в реальном времени
+    fun observeChatMessages(chatId: String): Flow<List<ChatMessage>> = callbackFlow {
+        val listener = chatMessagesCollection
+            .whereEqualTo("chatId", chatId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                val messages = snapshot?.documents?.mapNotNull { doc ->
+                    // Явно читаем isRead из документа, т.к. Kotlin val не всегда корректно
+                    // десериализуется через toObject() при обновлении поля
+                    val base = doc.toObject(ChatMessage::class.java) ?: return@mapNotNull null
+                    base.copy(
+                        id = doc.id,
+                        isRead = doc.getBoolean("isRead") ?: false
+                    )
+                }?.sortedBy { it.timestamp } ?: emptyList()
+                trySend(messages)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    // Пометить сообщения чата как прочитанные
+    suspend fun markMessagesAsRead(chatId: String, userId: String) {
+        try {
+            val snapshot = chatMessagesCollection
+                .whereEqualTo("chatId", chatId)
+                .get()
+                .await()
+            for (doc in snapshot.documents) {
+                val isAlreadyRead = doc.getBoolean("isRead") ?: false
+                val senderId = doc.getString("senderId") ?: ""
+                if (!isAlreadyRead && senderId != userId) {
+                    doc.reference.update("isRead", true).await()
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
+    // Количество непрочитанных входящих сообщений
+    suspend fun getUnreadMessageCount(chatId: String, userId: String): Int {
+        return try {
+            val snapshot = chatMessagesCollection
+                .whereEqualTo("chatId", chatId)
+                .get()
+                .await()
+            snapshot.documents.count { doc ->
+                val isRead = doc.getBoolean("isRead") ?: false
+                val senderId = doc.getString("senderId") ?: ""
+                !isRead && senderId != userId
+            }
+        } catch (e: Exception) {
+            0
+        }
+    }
+    
+    // Обновить профиль тренера (редактируемые поля)
+    suspend fun updateTrainerProfile(
+        userId: String,
+        email: String,
+        phone: String,
+        birthDate: String,
+        height: Float,
+        weight: Float
+    ): Result<Unit> {
+        return try {
+            val updates = hashMapOf(
+                "email" to email,
+                "phone" to phone,
+                "birthDate" to birthDate,
+                "height" to height,
+                "weight" to weight
+            )
+            usersCollection.document(userId).update(updates as Map<String, Any>).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Изменить пароль (требует ре-аутентификации)
+    suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> {
+        return try {
+            val user = auth.currentUser ?: return Result.failure(Exception("Не авторизован"))
+            val credential = EmailAuthProvider.getCredential(user.email ?: "", currentPassword)
+            user.reauthenticate(credential).await()
+            user.updatePassword(newPassword).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Получить доступные слоты расписания тренера (только будущие и незанятые)
+    suspend fun getAvailableTrainerSlots(trainerId: String): List<TrainerAvailability> {
+        return try {
+            val now = Calendar.getInstance().time
+            val snapshot = trainerAvailabilityCollection
+                .whereEqualTo("trainerId", trainerId)
+                .get()
+                .await()
+            snapshot.documents
+                .mapNotNull { it.toObject(TrainerAvailability::class.java)?.copy(id = it.id) }
+                .filter { slot ->
+                    slot.startTime.isNotBlank() &&
+                    slot.endTime.isNotBlank() &&
+                    slot.date.toDate().after(now)
+                }
+                .sortedWith(compareBy({ it.date }, { it.startTime }))
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun getBookedIndividualHours(trainerId: String): Set<String> {
+        return try {
+            val snapshot = groupWorkoutsCollection
+                .whereEqualTo("trainerId", trainerId)
+                .whereEqualTo("isIndividual", true)
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { doc ->
+                val ts = doc.getTimestamp("dateTime") ?: return@mapNotNull null
+                val cal = Calendar.getInstance().apply { time = ts.toDate() }
+                "%04d-%02d-%02d-%02d".format(
+                    cal.get(Calendar.YEAR),
+                    cal.get(Calendar.MONTH) + 1,
+                    cal.get(Calendar.DAY_OF_MONTH),
+                    cal.get(Calendar.HOUR_OF_DAY)
+                )
+            }.toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+    
+    // Записаться на индивидуальную тренировку: создать тренировку + занять слот
+    suspend fun bookIndividualTrainerSlot(
+        slot: TrainerAvailability,
+        currentUser: User,
+        selectedHour: Int = -1  // -1 = использовать startTime слота
+    ): Result<String> {
+        return try {
+            // Определяем час начала: выбранный или из startTime слота
+            val startHour = if (selectedHour >= 0) selectedHour
+            else slot.startTime.split(":").firstOrNull()?.toIntOrNull() ?: 0
+
+            val startTimeStr = "%02d:00".format(startHour)
+            val endTimeStr = "%02d:00".format(startHour + 1)
+
+            // Составляем дату и время тренировки
+            val cal = Calendar.getInstance().apply {
+                time = slot.date.toDate()
+                set(Calendar.HOUR_OF_DAY, startHour)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val workoutTimestamp = Timestamp(cal.time)
+            val durationMinutes = 60
+            
+            // Создаём индивидуальную тренировку
+            val workoutData = hashMapOf(
+                "name" to "Индивидуальная тренировка",
+                "description" to "",
+                "trainerId" to slot.trainerId,
+                "trainerName" to slot.trainerName,
+                "clientId" to currentUser.id,
+                "clientName" to currentUser.fullName,
+                "dateTime" to workoutTimestamp,
+                "durationMinutes" to durationMinutes,
+                "maxParticipants" to 1,
+                "currentParticipants" to 1,
+                "participantIds" to listOf(currentUser.id),
+                "isIndividual" to true,
+                "availabilitySlotId" to slot.id,
+                "active" to true
+            )
+            val docRef = groupWorkoutsCollection.add(workoutData).await()
+            
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    // Отменить индивидуальную тренировку: удалить запись и восстановить слот тренера
+    suspend fun cancelIndividualWorkout(workoutId: String): Result<Unit> {
+        return try {
+            groupWorkoutsCollection.document(workoutId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // Обновить пол пользователя (перенос в личные данные)
     suspend fun updateUserGender(gender: String): Result<Unit> {
         val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Не авторизован"))

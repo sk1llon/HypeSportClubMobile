@@ -1,4 +1,4 @@
-﻿package com.example.mobilka.ui.screens
+package com.example.mobilka.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -385,8 +385,8 @@ fun AdminScreen(
                         label = Strings.workouts(lang),
                         isSelected = currentView == AdminViewMode.GROUP_WORKOUTS,
                         onClick = { currentView = AdminViewMode.GROUP_WORKOUTS },
-                        modifier = Modifier.weight(1f)
-                    )
+                    modifier = Modifier.weight(1f)
+                )
                 }
             }
             
@@ -2982,10 +2982,10 @@ private fun AddIndividualWorkoutDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = "🏋️", fontSize = 24.sp)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
+            Text(
                     text = Strings.individualWorkout(lang),
-                    fontWeight = FontWeight.Bold
-                )
+                fontWeight = FontWeight.Bold
+            )
             }
         },
         text = {
@@ -2995,7 +2995,7 @@ private fun AddIndividualWorkoutDialog(
             ) {
                 // Поиск и выбор клиента с автодополнением
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
+                OutlinedTextField(
                         value = if (selectedClient != null) selectedClient!!.fullName else clientSearchQuery,
                         onValueChange = { 
                             clientSearchQuery = it
@@ -3003,7 +3003,7 @@ private fun AddIndividualWorkoutDialog(
                             showClientDropdown = true
                         },
                         label = { Text(if (lang == AppLanguage.RUSSIAN) "ФИО клиента" else "Client name") },
-                        singleLine = true,
+                    singleLine = true,
                         trailingIcon = {
                             if (selectedClient != null) {
                                 IconButton(onClick = { 
@@ -3018,10 +3018,10 @@ private fun AddIndividualWorkoutDialog(
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
                     DropdownMenu(
                         expanded = showClientDropdown && filteredClients.isNotEmpty(),
                         onDismissRequest = { showClientDropdown = false },
@@ -3069,7 +3069,7 @@ private fun AddIndividualWorkoutDialog(
                 
                 // Поиск и выбор тренера с автодополнением
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
+                OutlinedTextField(
                         value = if (selectedTrainer != null) selectedTrainer!!.fullName else trainerSearchQuery,
                         onValueChange = { 
                             trainerSearchQuery = it
@@ -3077,7 +3077,7 @@ private fun AddIndividualWorkoutDialog(
                             showTrainerDropdown = true
                         },
                         label = { Text(Strings.selectTrainer(lang)) },
-                        singleLine = true,
+                    singleLine = true,
                         trailingIcon = {
                             if (selectedTrainer != null) {
                                 IconButton(onClick = { 
@@ -3092,7 +3092,7 @@ private fun AddIndividualWorkoutDialog(
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     )
                     

@@ -105,8 +105,10 @@ service cloud.firestore {
       // Чтение: все авторизованные пользователи
       allow read: if isAuthenticated();
       
-      // Создание: админ или тренер
-      allow create: if isStaff();
+      // Создание: админ/тренер или клиент записывает индивидуальную тренировку на себя
+      allow create: if isStaff() ||
+        (isClient() && request.resource.data.isIndividual == true &&
+         request.resource.data.clientId == request.auth.uid);
       
       // Обновление: админ, тренер (своих тренировок) или клиент (запись/отмена записи на тренировку)
       allow update: if isAdmin() || 
@@ -116,8 +118,45 @@ service cloud.firestore {
         // Клиент может записаться на групповую тренировку (добавить/удалить себя из participantIds)
         (isClient() && isSignUpOrCancelUpdate());
       
-      // Удаление: только админ
-      allow delete: if isAdmin();
+      // Удаление: админ или клиент отменяет свою индивидуальную тренировку
+      allow delete: if isAdmin() ||
+        (isClient() && resource.data.isIndividual == true &&
+         resource.data.clientId == request.auth.uid);
+    }
+    
+    // ==================== РАСПИСАНИЕ ТРЕНЕРОВ (trainer_availability) ====================
+    match /trainer_availability/{availabilityId} {
+      // Чтение: все авторизованные пользователи (клиенты видят расписание для записи)
+      allow read: if isAuthenticated();
+      
+      // Создание: тренер создаёт своё расписание или админ
+      allow create: if isAdmin() || 
+        (isTrainer() && request.resource.data.trainerId == request.auth.uid);
+      
+      // Обновление: тренер или админ
+      allow update: if isAdmin() || 
+        (isTrainer() && resource.data.trainerId == request.auth.uid);
+      
+      // Удаление: тренер может удалить своё расписание или админ
+      allow delete: if isAdmin() || 
+        (isTrainer() && resource.data.trainerId == request.auth.uid);
+    }
+    
+    // ==================== ЧАТЫ (chats) ====================
+    match /chats/{messageId} {
+      // Чтение: все авторизованные пользователи (фильтрация по chatId на уровне приложения)
+      allow read: if isAuthenticated();
+      
+      // Создание: авторизованный пользователь может отправить сообщение от своего имени
+      allow create: if isAuthenticated() && 
+        request.resource.data.senderId == request.auth.uid;
+      
+      // Обновление: пометка прочитанным
+      allow update: if isAuthenticated();
+      
+      // Удаление: автор или админ
+      allow delete: if isAuthenticated() && 
+        (resource.data.senderId == request.auth.uid || isAdmin());
     }
     
     // ==================== ЗАПИСИ НА ТРЕНИРОВКИ (workout_registrations) ====================

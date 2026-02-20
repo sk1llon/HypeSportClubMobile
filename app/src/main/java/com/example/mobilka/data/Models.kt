@@ -357,11 +357,12 @@ data class GroupWorkout(
     val currentParticipants: Int = 0,
     val participantIds: List<String> = emptyList(), // Список ID участников групповой тренировки
     val isIndividual: Boolean = false, // Флаг индивидуальной тренировки
+    val availabilitySlotId: String = "", // ID слота расписания (для индивидуальных тренировок)
     @get:PropertyName("active")
     @set:PropertyName("active")
     var active: Boolean = true
 ) {
-    constructor() : this("", "", "", "", "", "", "", Timestamp.now(), 60, 20, 0, emptyList(), false, true)
+    constructor() : this("", "", "", "", "", "", "", Timestamp.now(), 60, 20, 0, emptyList(), false, "", true)
     
     val formattedDateTime: String
         get() {
@@ -379,4 +380,57 @@ data class GroupWorkout(
     
     // Проверка, записан ли пользователь на тренировку
     fun isUserSignedUp(userId: String): Boolean = participantIds.contains(userId)
+}
+
+// Модель расписания тренера для индивидуальных тренировок
+data class TrainerAvailability(
+    @DocumentId
+    val id: String = "",
+    val trainerId: String = "",        // ID тренера (из коллекции users)
+    val trainerName: String = "",      // ФИО тренера
+    val date: Timestamp = Timestamp.now(), // Дата доступности
+    val startTime: String = "",        // Время начала (формат "HH:mm")
+    val endTime: String = "",          // Время окончания (формат "HH:mm")
+    val isAvailable: Boolean = true,   // Доступен ли в это время
+    val notes: String = ""             // Примечания
+) {
+    constructor() : this("", "", "", Timestamp.now(), "", "", true, "")
+    
+    val formattedDate: String
+        get() {
+            val date = date.toDate()
+            val format = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+            return format.format(date)
+        }
+    
+    val timeRange: String
+        get() = "$startTime - $endTime"
+}
+
+// Модель сообщения в чате
+data class ChatMessage(
+    @DocumentId
+    val id: String = "",
+    val chatId: String = "",         // ID чата (trainerId_clientId)
+    val senderId: String = "",       // ID отправителя
+    val senderName: String = "",     // ФИО отправителя
+    val text: String = "",
+    val timestamp: Timestamp = Timestamp.now(),
+    val isRead: Boolean = false
+) {
+    constructor() : this("", "", "", "", "", Timestamp.now(), false)
+    
+    val formattedTime: String
+        get() {
+            val date = timestamp.toDate()
+            val format = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            return format.format(date)
+        }
+    
+    val formattedDate: String
+        get() {
+            val date = timestamp.toDate()
+            val format = java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+            return format.format(date)
+        }
 }

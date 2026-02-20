@@ -139,6 +139,11 @@ object Strings {
         AppLanguage.ENGLISH -> "Macros"
     }
     
+    fun chats(lang: AppLanguage) = when (lang) {
+        AppLanguage.RUSSIAN -> "Чаты"
+        AppLanguage.ENGLISH -> "Chats"
+    }
+    
     fun workouts(lang: AppLanguage) = when (lang) {
         AppLanguage.RUSSIAN -> "Тренировки"
         AppLanguage.ENGLISH -> "Workouts"

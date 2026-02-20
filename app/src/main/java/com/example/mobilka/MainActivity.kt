@@ -16,7 +16,6 @@ import com.example.mobilka.data.SettingsManager
 import com.example.mobilka.navigation.AppNavigation
 import com.example.mobilka.navigation.Screen
 import com.example.mobilka.ui.theme.MobilkaTheme
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,21 +36,6 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-                    val scope = rememberCoroutineScope()
-                    
-                    // Инициализируем админа в фоне (не блокируем запуск)
-                    LaunchedEffect(Unit) {
-                        scope.launch {
-                            try {
-                                // Небольшая задержка, чтобы Firebase успел инициализироваться
-                                kotlinx.coroutines.delay(500)
-                                FirebaseRepo.instance.ensureAdminExists()
-                            } catch (e: Exception) {
-                                // Игнорируем ошибки инициализации - не критично
-                                e.printStackTrace()
-                            }
-                        }
-                    }
                     
                     // Определяем начальный экран в зависимости от авторизации Firebase
                     val startDestination = if (FirebaseRepo.instance.isLoggedIn) {
