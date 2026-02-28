@@ -483,7 +483,7 @@ fun AdminScreen(
                                                     )
                                                     val trainerResult = repository.addTrainer(trainer)
                                                     if (trainerResult.isFailure) {
-                                                        errorMessage = "${Strings.error(lang)}: trainer not saved"
+                                                        errorMessage = "${Strings.error(lang)}: не удалось сохранить данные тренера"
                                                     }
                                                     
                                                     repository.updateUserData(
@@ -2270,7 +2270,7 @@ private fun AddUserFullScreen(
         }
     } else {
         // Шаг 2: Заполнение формы
-        val isFormValid = email.isNotBlank() && 
+        val isFormValid = email.isNotBlank() && email.contains("@") &&
                          password.length >= 6 && 
                          lastName.isNotBlank() && 
                          firstName.isNotBlank() && 
@@ -3159,7 +3159,7 @@ private fun AddIndividualWorkoutDialog(
                     singleLine = true,
                     isError = dateTimeError,
                     supportingText = if (dateTimeError) {
-                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты" else "Invalid date format") }
+                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты и времени" else "Invalid date/time format") }
                     } else null,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
@@ -3196,7 +3196,7 @@ private fun AddIndividualWorkoutDialog(
                         clientId = selectedClient?.id ?: "",
                         clientName = selectedClient?.fullName ?: "",
                         dateTime = dateTime,
-                        durationMinutes = durationMinutes.toIntOrNull() ?: 60,
+                        durationMinutes = (durationMinutes.toIntOrNull() ?: 60).coerceAtLeast(1),
                         maxParticipants = 1,
                         currentParticipants = 1,
                         isIndividual = true,
@@ -3426,8 +3426,8 @@ private fun AddGroupWorkoutDialog(
                         trainerId = selectedTrainer?.id ?: "",
                         trainerName = selectedTrainer?.fullName ?: "",
                         dateTime = dateTime,
-                        durationMinutes = durationMinutes.toIntOrNull() ?: 60,
-                        maxParticipants = maxParticipants.toIntOrNull() ?: 20,
+                        durationMinutes = (durationMinutes.toIntOrNull() ?: 60).coerceAtLeast(1),
+                        maxParticipants = (maxParticipants.toIntOrNull() ?: 20).coerceAtLeast(1),
                         currentParticipants = 0,
                         active = true
                     )
@@ -3700,7 +3700,7 @@ private fun EditWorkoutDialog(
                     singleLine = true,
                     isError = dateTimeError,
                     supportingText = if (dateTimeError) {
-                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты" else "Invalid date format") }
+                        { Text(if (lang == AppLanguage.RUSSIAN) "Неверный формат даты и времени" else "Invalid date/time format") }
                     } else null,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
@@ -3754,8 +3754,8 @@ private fun EditWorkoutDialog(
                         clientId = if (workout.isIndividualWorkout) (selectedClient?.id ?: workout.clientId) else workout.clientId,
                         clientName = if (workout.isIndividualWorkout) (selectedClient?.fullName ?: workout.clientName) else workout.clientName,
                         dateTime = dateTime,
-                        durationMinutes = durationMinutes.toIntOrNull() ?: workout.durationMinutes,
-                        maxParticipants = if (workout.isIndividualWorkout) 1 else (maxParticipants.toIntOrNull() ?: workout.maxParticipants)
+                        durationMinutes = (durationMinutes.toIntOrNull() ?: workout.durationMinutes).coerceAtLeast(1),
+                        maxParticipants = if (workout.isIndividualWorkout) 1 else (maxParticipants.toIntOrNull() ?: workout.maxParticipants).coerceAtLeast(1)
                     )
                     onSave(updatedWorkout)
                 },

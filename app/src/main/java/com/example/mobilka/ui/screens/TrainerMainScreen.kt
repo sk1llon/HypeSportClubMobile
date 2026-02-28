@@ -1195,11 +1195,6 @@ private fun TrainerProfileScreen(
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
 
-    val genderDisplay = when (user?.gender) {
-        "FEMALE" -> "Женский"
-        else -> "Мужской"
-    }
-
     var email by remember(user?.email) { mutableStateOf(user?.email ?: "") }
     var phone by remember(user?.phone) { mutableStateOf(user?.phone ?: "") }
     var birthDate by remember(user?.birthDate) { mutableStateOf(user?.birthDate ?: "") }
@@ -1233,51 +1228,26 @@ private fun TrainerProfileScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Аватар и ФИО
+        // Аватар
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                Box(
+                    modifier = Modifier.size(96.dp).clip(CircleShape).background(SportOrange),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier.size(80.dp).clip(CircleShape).background(SportOrange),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = user?.firstName?.firstOrNull()?.uppercase() ?: "?",
-                            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = user?.fullName ?: "Тренер",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        text = user?.firstName?.firstOrNull()?.uppercase() ?: "?",
+                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
                     )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
-                    ) {
-                        Text(
-                            text = "Тренер",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
         }
 
-        // Нередактируемые поля
+        // Нередактируемые поля: Фамилия, Имя, Отчество
         item {
             Text(
                 text = "Личные данные",
@@ -1286,7 +1256,13 @@ private fun TrainerProfileScreen(
             )
         }
         item {
-            ProfileReadonlyField(label = "Пол", value = genderDisplay, icon = "⚧")
+            ProfileReadonlyField(label = "Фамилия", value = user?.lastName ?: "—", icon = "👤")
+        }
+        item {
+            ProfileReadonlyField(label = "Имя", value = user?.firstName ?: "—", icon = "👤")
+        }
+        item {
+            ProfileReadonlyField(label = "Отчество", value = user?.middleName ?: "—", icon = "👤")
         }
 
         // Редактируемые поля
@@ -1312,7 +1288,7 @@ private fun TrainerProfileScreen(
             ProfileEditField(
                 label = "Дата рождения (ДД.ММ.ГГГГ)",
                 value = birthDate,
-                onValueChange = { if (it.length <= 10) birthDate = it },
+                onValueChange = { if (it.length <= 10 && it.all { c -> c.isDigit() || c == '.' }) birthDate = it },
                 icon = "📅"
             )
         }
@@ -1354,21 +1330,41 @@ private fun TrainerProfileScreen(
                     Button(
                         onClick = {
                             scope.launch {
-                                isSaving = true
                                 errorMessage = null
+                                val emailVal = email.trim()
+                                if (emailVal.isNotBlank() && !emailVal.contains("@")) {
+                                    errorMessage = "Введите корректный email-адрес"
+                                    return@launch
+                                }
+                                val bdVal = birthDate.trim()
+                                if (bdVal.isNotBlank() && bdVal.length != 10) {
+                                    errorMessage = "Дата рождения должна быть в формате ДД.ММ.ГГГГ"
+                                    return@launch
+                                }
+                                val h = height.toIntOrNull() ?: 0
+                                if (height.isNotBlank() && (h < 50 || h > 300)) {
+                                    errorMessage = "Рост должен быть от 50 до 300 см"
+                                    return@launch
+                                }
+                                val w = weight.toIntOrNull() ?: 0
+                                if (weight.isNotBlank() && (w < 20 || w > 500)) {
+                                    errorMessage = "Вес должен быть от 20 до 500 кг"
+                                    return@launch
+                                }
+                                isSaving = true
                                 val userId = user?.id ?: return@launch
                                 val result = repository.updateTrainerProfile(
                                     userId = userId,
-                                    email = email.trim(),
+                                    email = emailVal,
                                     phone = phone.trim(),
-                                    birthDate = birthDate.trim(),
+                                    birthDate = bdVal,
                                     height = height.toFloatOrNull() ?: 0f,
                                     weight = weight.toFloatOrNull() ?: 0f
                                 )
                                 if (result.isSuccess) {
                                     successMessage = "Данные сохранены"
                                 } else {
-                                    errorMessage = result.exceptionOrNull()?.message ?: "Ошибка сохранения"
+                                    errorMessage = "Не удалось сохранить данные. Попробуйте позже"
                                 }
                                 isSaving = false
                             }
@@ -1486,7 +1482,7 @@ private fun TrainerProfileScreen(
                                         return@launch
                                     }
                                     if (newPassword != confirmNewPassword) {
-                                        errorMessage = "Пароли не совпадают"
+                                        errorMessage = "Пароли не совпадают. Проверьте правильность ввода"
                                         return@launch
                                     }
                                     isSaving = true
@@ -1497,7 +1493,18 @@ private fun TrainerProfileScreen(
                                         currentPassword = ""; newPassword = ""; confirmNewPassword = ""
                                         showPasswordSection = false
                                     } else {
-                                        errorMessage = "Ошибка: ${result.exceptionOrNull()?.message}"
+                                        val msg = result.exceptionOrNull()?.message ?: ""
+                                        errorMessage = when {
+                                            msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
+                                            msg.contains("password is invalid", ignoreCase = true) ||
+                                            msg.contains("wrong-password", ignoreCase = true) ->
+                                                "Неверный текущий пароль"
+                                            msg.contains("network", ignoreCase = true) ->
+                                                "Ошибка сети. Проверьте подключение к интернету"
+                                            msg.contains("requires-recent-login", ignoreCase = true) ->
+                                                "Для смены пароля необходимо заново войти в аккаунт"
+                                            else -> "Не удалось сменить пароль. Попробуйте позже"
+                                        }
                                     }
                                 }
                             },

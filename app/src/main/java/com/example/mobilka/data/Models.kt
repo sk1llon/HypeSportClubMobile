@@ -434,3 +434,74 @@ data class ChatMessage(
             return format.format(date)
         }
 }
+
+// ==================== БЖУ КАЛЬКУЛЯТОР ====================
+
+// Продукт из встроенной базы (JSON)
+data class FoodProduct(
+    val name: String = "",
+    val calories: Float = 0f,
+    val proteins: Float = 0f,
+    val fats: Float = 0f,
+    val carbs: Float = 0f,
+    val category: String = ""
+)
+
+// Запись о съеденном продукте (Firestore)
+data class FoodEntry(
+    @DocumentId
+    val id: String = "",
+    val userId: String = "",
+    val productName: String = "",
+    val weightGrams: Float = 0f,
+    val calories: Float = 0f,
+    val proteins: Float = 0f,
+    val fats: Float = 0f,
+    val carbs: Float = 0f,
+    val date: String = "",
+    val createdAt: Timestamp = Timestamp.now()
+) {
+    constructor() : this("", "", "", 0f, 0f, 0f, 0f, 0f, "", Timestamp.now())
+}
+
+// Дневная норма КБЖУ
+data class DailyNorm(
+    val calories: Float,
+    val proteins: Float,
+    val fats: Float,
+    val carbs: Float
+)
+
+object NutritionCalculator {
+    /**
+     * Формула Миффлина-Сан Жеора с коэф. активности 1.55 (умеренная).
+     * Макронутриенты: белки 30%, жиры 25%, углеводы 45%.
+     */
+    fun calculateDailyNorm(
+        gender: Gender,
+        weightKg: Float,
+        heightCm: Float,
+        age: Int,
+        goal: FitnessGoal
+    ): DailyNorm {
+        if (weightKg <= 0f || heightCm <= 0f || age <= 0) {
+            return DailyNorm(2000f, 150f, 56f, 225f)
+        }
+        val bmr = when (gender) {
+            Gender.MALE -> 10f * weightKg + 6.25f * heightCm - 5f * age + 5f
+            Gender.FEMALE -> 10f * weightKg + 6.25f * heightCm - 5f * age - 161f
+        }
+        val tdee = bmr * 1.55f
+        val adjustedCalories = when (goal) {
+            FitnessGoal.WEIGHT_LOSS -> tdee * 0.80f
+            FitnessGoal.MUSCLE_GAIN -> tdee * 1.15f
+            FitnessGoal.MAINTENANCE -> tdee
+        }
+        return DailyNorm(
+            calories = adjustedCalories,
+            proteins = adjustedCalories * 0.30f / 4f,
+            fats = adjustedCalories * 0.25f / 9f,
+            carbs = adjustedCalories * 0.45f / 4f
+        )
+    }
+}

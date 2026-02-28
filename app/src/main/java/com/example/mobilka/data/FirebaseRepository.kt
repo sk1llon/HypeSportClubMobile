@@ -26,6 +26,7 @@ class FirebaseRepository {
     private val trainersCollection = firestore.collection("trainers")
     private val groupWorkoutsCollection = firestore.collection("group_workouts")
     private val trainerAvailabilityCollection = firestore.collection("trainer_availability")
+    private val foodEntriesCollection = firestore.collection("food_entries")
     
     // Текущий пользователь Firebase
     val currentFirebaseUser: FirebaseUser?
@@ -1224,6 +1225,72 @@ class FirebaseRepository {
         }
     }
     
+    // ==================== БЖУ КАЛЬКУЛЯТОР (food_entries) ====================
+
+    suspend fun addFoodEntry(entry: FoodEntry): Result<String> {
+        return try {
+            val userId = auth.currentUser?.uid ?: throw Exception("Пользователь не авторизован")
+            val data = hashMapOf(
+                "userId" to userId,
+                "productName" to entry.productName,
+                "weightGrams" to entry.weightGrams,
+                "calories" to entry.calories,
+                "proteins" to entry.proteins,
+                "fats" to entry.fats,
+                "carbs" to entry.carbs,
+                "date" to entry.date,
+                "createdAt" to com.google.firebase.Timestamp.now()
+            )
+            val doc = foodEntriesCollection.add(data).await()
+            Result.success(doc.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getFoodEntriesByDate(date: String): List<FoodEntry> {
+        return try {
+            val userId = auth.currentUser?.uid ?: return emptyList()
+            val snapshot = foodEntriesCollection
+                .whereEqualTo("userId", userId)
+                .whereEqualTo("date", date)
+                .get()
+                .await()
+            snapshot.documents.mapNotNull { doc ->
+                doc.toObject(FoodEntry::class.java)?.copy(id = doc.id)
+            }.sortedByDescending { it.createdAt }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun observeFoodEntries(date: String): Flow<List<FoodEntry>> = callbackFlow {
+        val userId = auth.currentUser?.uid ?: run {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val listener = foodEntriesCollection
+            .whereEqualTo("userId", userId)
+            .whereEqualTo("date", date)
+            .addSnapshotListener { snapshot, _ ->
+                val entries = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(FoodEntry::class.java)?.copy(id = doc.id)
+                }?.sortedByDescending { it.createdAt } ?: emptyList()
+                trySend(entries)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun deleteFoodEntry(entryId: String): Result<Unit> {
+        return try {
+            foodEntriesCollection.document(entryId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // ==================== УТИЛИТЫ ====================
     
     private fun mapFirebaseException(e: Exception): Exception {

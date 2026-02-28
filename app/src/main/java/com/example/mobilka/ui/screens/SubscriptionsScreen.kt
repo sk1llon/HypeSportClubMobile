@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Email
@@ -35,7 +36,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +57,10 @@ import com.example.mobilka.data.TrainerAvailability
 import com.example.mobilka.data.User
 import com.example.mobilka.data.UserRole
 import com.example.mobilka.data.UserSubscription
+import com.example.mobilka.data.FoodEntry
+import com.example.mobilka.data.FoodProduct
+import com.example.mobilka.data.DailyNorm
+import com.example.mobilka.data.NutritionCalculator
 import com.example.mobilka.ui.theme.EnergyGreen
 import com.example.mobilka.ui.theme.SportOrange
 import com.example.mobilka.ui.theme.SportOrangeDark
@@ -340,15 +347,23 @@ fun SubscriptionsScreen(
                 // Контент в зависимости от выбранного пункта навигации
                 when (selectedNavItem) {
                     ClientNavItem.HOME -> {
-                        // Главная страница
-                        HomeWelcomeContent()
+                        HomeWelcomeContent(
+                            activeSubscriptions = activeSubscriptions,
+                            trainers = trainersList,
+                            onNavigateToSubscriptions = {
+                                currentProfileSection = ProfileSection.SUBSCRIPTIONS
+                                selectedNavItem = ClientNavItem.PROFILE
+                            },
+                            onNavigateToTrainers = {
+                                currentProfileSection = ProfileSection.TRAINERS
+                                selectedNavItem = ClientNavItem.PROFILE
+                            }
+                        )
                     }
                     ClientNavItem.CALCULATOR -> {
-                        // Заглушка для БЖУ калькулятора
-                        PlaceholderContent(
-                            icon = "🧮",
-                            title = "БЖУ Калькулятор",
-                            subtitle = "Раздел в разработке"
+                        NutritionScreen(
+                            currentUser = currentUser,
+                            lang = lang
                         )
                     }
                     ClientNavItem.CHATS -> {
@@ -472,7 +487,6 @@ fun SubscriptionsScreen(
                                 ProfileContent(
                                     user = currentUser,
                                     onPersonalInfoClick = { currentProfileSection = ProfileSection.PERSONAL_INFO },
-                                    onHealthDataClick = { currentProfileSection = ProfileSection.HEALTH_DATA },
                                     onSubscriptionsClick = { currentProfileSection = ProfileSection.SUBSCRIPTIONS },
                                     onTrainersClick = { currentProfileSection = ProfileSection.TRAINERS },
                                     onSettingsClick = { currentProfileSection = ProfileSection.SETTINGS },
@@ -486,26 +500,22 @@ fun SubscriptionsScreen(
                             ProfileSection.PERSONAL_INFO -> {
                                 PersonalInfoScreen(
                                     user = currentUser,
-                                    onSave = { phone, email ->
+                                    onSave = { phone, email, weight, height, goal ->
                                         scope.launch {
                                             repository.updateUserContactInfo(phone, email)
+                                            repository.updateUserHealthData(
+                                                currentUser?.gender ?: "MALE", weight, height, goal
+                                            )
                                         }
                                     }
                                 )
                             }
                             ProfileSection.HEALTH_DATA -> {
-                                HealthDataScreen(
-                                    user = currentUser,
-                                    onSave = { gender, weight, height, goal ->
-                                        scope.launch {
-                                            repository.updateUserHealthData(gender, weight, height, goal)
-                                        }
-                                    }
-                                )
+                                currentProfileSection = ProfileSection.PERSONAL_INFO
                             }
                             ProfileSection.SUBSCRIPTIONS -> {
                                 SubscriptionsFullScreen(
-                                    userSubscriptions = activeSubscriptions,
+                                    userSubscriptions = userSubscriptions,
                                     availableSubscriptions = availableSubscriptions,
                                     onPurchase = { subscription ->
                                         currentProfileSection = null
@@ -1097,91 +1107,910 @@ private fun HomeContent(
 }
 
 @Composable
-private fun HomeWelcomeContent() {
-    Box(
+private fun HomeWelcomeContent(
+    activeSubscriptions: List<UserSubscription>,
+    trainers: List<Trainer>,
+    onNavigateToSubscriptions: () -> Unit,
+    onNavigateToTrainers: () -> Unit
+) {
+    val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+
+    LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Секция абонементов
+        item {
+            Text(
+                text = if (activeSubscriptions.size > 1) "Мои абонементы" else "Мой абонемент",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        }
+
+        if (activeSubscriptions.isNotEmpty()) {
+            items(activeSubscriptions, key = { it.id }) { sub ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(SportOrange.copy(alpha = 0.85f), SportOrangeDark)
+                                )
+                            )
+                    ) {
+                        Column(modifier = Modifier.padding(20.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = sub.subscriptionIconEmoji,
+                                        fontSize = 32.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = sub.subscriptionName,
+                                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Color.White.copy(alpha = 0.2f))
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = sub.remainingDays.toString(),
+                                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = getDaysText(sub.remainingDays.toInt()),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Куплен: ${sub.startLocalDate.format(dateFormatter)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.8f)
+                                )
+                                Text(
+                                    text = "До: ${sub.endLocalDate.format(dateFormatter)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                OutlinedButton(
+                    onClick = onNavigateToSubscriptions,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, SportOrange)
+                ) {
+                    Text(
+                        text = "Просмотреть все абонементы",
+                        color = SportOrange,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+        } else {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(text = "🏋️", fontSize = 48.sp)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "У вас ещё нет купленных абонементов",
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = onNavigateToSubscriptions,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
+                        ) {
+                            Text(
+                                text = "Посмотреть абонементы",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Секция «Тренеры клуба»
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Тренеры клуба",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        }
+
+        if (trainers.isNotEmpty()) {
+            item {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(trainers) { trainer ->
+                        Card(
+                            modifier = Modifier.width(160.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                        .background(SportOrange),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 26.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = trainer.fullName,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2
+                                )
+                                val specText = trainer.specializationsText
+                                if (specText.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = specText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = SportOrange,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                OutlinedButton(
+                    onClick = onNavigateToTrainers,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, SportOrange)
+                ) {
+                    Text(
+                        text = "Просмотреть всех тренеров",
+                        color = SportOrange,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+        } else {
+            item {
+                Text(
+                    text = "Тренеры пока не добавлены",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(32.dp)) }
+    }
+}
+
+// ==================== БЖУ КАЛЬКУЛЯТОР ====================
+
+private fun loadFoodProducts(context: android.content.Context): List<FoodProduct> {
+    return try {
+        val json = context.assets.open("food_products.json").bufferedReader().use { it.readText() }
+        val arr = org.json.JSONArray(json)
+        (0 until arr.length()).map { i ->
+            val obj = arr.getJSONObject(i)
+            FoodProduct(
+                name = obj.getString("name"),
+                calories = obj.getDouble("calories").toFloat(),
+                proteins = obj.getDouble("proteins").toFloat(),
+                fats = obj.getDouble("fats").toFloat(),
+                carbs = obj.getDouble("carbs").toFloat(),
+                category = obj.optString("category", "")
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NutritionScreen(
+    currentUser: User?,
+    lang: AppLanguage
+) {
+    val context = LocalContext.current
+    val repository = remember { FirebaseRepo.instance }
+    val scope = rememberCoroutineScope()
+
+    val allProducts = remember { loadFoodProducts(context) }
+    val categories = remember(allProducts) { allProducts.map { it.category }.distinct().sorted() }
+
+    var selectedDate by remember { mutableStateOf(java.time.LocalDate.now()) }
+    val dateStr = remember(selectedDate) { selectedDate.format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE) }
+
+    var foodEntries by remember { mutableStateOf<List<FoodEntry>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var entryToDelete by remember { mutableStateOf<FoodEntry?>(null) }
+
+    val dailyNorm = remember(currentUser) {
+        if (currentUser != null && currentUser.weight > 0f && currentUser.height > 0f && currentUser.age > 0) {
+            NutritionCalculator.calculateDailyNorm(
+                currentUser.userGender,
+                currentUser.weight,
+                currentUser.height,
+                currentUser.age,
+                currentUser.userFitnessGoal
+            )
+        } else {
+            DailyNorm(2000f, 150f, 56f, 225f)
+        }
+    }
+
+    LaunchedEffect(dateStr) {
+        isLoading = true
+        repository.observeFoodEntries(dateStr).collect { entries ->
+            foodEntries = entries
+            isLoading = false
+        }
+    }
+
+    val totalCalories = foodEntries.sumOf { it.calories.toDouble() }.toFloat()
+    val totalProteins = foodEntries.sumOf { it.proteins.toDouble() }.toFloat()
+    val totalFats = foodEntries.sumOf { it.fats.toDouble() }.toFloat()
+    val totalCarbs = foodEntries.sumOf { it.carbs.toDouble() }.toFloat()
+
+    val today = java.time.LocalDate.now()
+    val dayLabel = when {
+        selectedDate == today -> if (lang == AppLanguage.RUSSIAN) "Сегодня" else "Today"
+        selectedDate == today.minusDays(1) -> if (lang == AppLanguage.RUSSIAN) "Вчера" else "Yesterday"
+        selectedDate == today.plusDays(1) -> if (lang == AppLanguage.RUSSIAN) "Завтра" else "Tomorrow"
+        else -> selectedDate.format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy"))
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+        ) {
+            // Навигация по дням
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { selectedDate = selectedDate.minusDays(1) }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Предыдущий день"
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = dayLabel,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        if (selectedDate != today) {
+                            TextButton(onClick = { selectedDate = today }) {
+                                Text(
+                                    text = if (lang == AppLanguage.RUSSIAN) "Сегодня" else "Today",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SportOrange
+                                )
+                            }
+                        }
+                    }
+                    IconButton(onClick = { selectedDate = selectedDate.plusDays(1) }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Следующий день"
+                        )
+                    }
+                }
+            }
+
+            // Сводка по калориям
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (lang == AppLanguage.RUSSIAN) "Калории" else "Calories",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = "%.0f".format(totalCalories),
+                                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                                color = SportOrange
+                            )
+                            Text(
+                                text = " / %.0f".format(dailyNorm.calories),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (lang == AppLanguage.RUSSIAN) "ккал" else "kcal",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val calProgress = if (dailyNorm.calories > 0) (totalCalories / dailyNorm.calories).coerceIn(0f, 1f) else 0f
+                        LinearProgressIndicator(
+                            progress = { calProgress },
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                            color = SportOrange,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            }
+
+            // Прогресс-бары БЖУ
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    NutrientProgressCard(
+                        modifier = Modifier.weight(1f),
+                        label = if (lang == AppLanguage.RUSSIAN) "Белки" else "Protein",
+                        current = totalProteins,
+                        norm = dailyNorm.proteins,
+                        unit = if (lang == AppLanguage.RUSSIAN) "г" else "g",
+                        color = Color(0xFF4CAF50)
+                    )
+                    NutrientProgressCard(
+                        modifier = Modifier.weight(1f),
+                        label = if (lang == AppLanguage.RUSSIAN) "Жиры" else "Fats",
+                        current = totalFats,
+                        norm = dailyNorm.fats,
+                        unit = if (lang == AppLanguage.RUSSIAN) "г" else "g",
+                        color = Color(0xFFFFA726)
+                    )
+                    NutrientProgressCard(
+                        modifier = Modifier.weight(1f),
+                        label = if (lang == AppLanguage.RUSSIAN) "Углеводы" else "Carbs",
+                        current = totalCarbs,
+                        norm = dailyNorm.carbs,
+                        unit = if (lang == AppLanguage.RUSSIAN) "г" else "g",
+                        color = Color(0xFF42A5F5)
+                    )
+                }
+            }
+
+            // Список продуктов за день
+            item {
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "Приёмы пищи" else "Meals",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+
+            if (isLoading) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = SportOrange)
+                    }
+                }
+            } else if (foodEntries.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "🍽️", fontSize = 48.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = if (lang == AppLanguage.RUSSIAN) "Нет записей за этот день" else "No entries for this day",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (lang == AppLanguage.RUSSIAN)
+                                    "Нажмите «+» чтобы добавить продукт"
+                                else "Tap «+» to add a product",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(foodEntries.size) { index ->
+                    val entry = foodEntries[index]
+                    FoodEntryCard(
+                        entry = entry,
+                        lang = lang,
+                        onDelete = { entryToDelete = entry }
+                    )
+                }
+            }
+        }
+
+        // FAB
+        FloatingActionButton(
+            onClick = { showAddDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            containerColor = SportOrange,
+            contentColor = Color.White
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Добавить")
+        }
+    }
+
+    // Диалог добавления продукта
+    if (showAddDialog) {
+        AddFoodDialog(
+            allProducts = allProducts,
+            categories = categories,
+            lang = lang,
+            onDismiss = { showAddDialog = false },
+            onAdd = { product, weightGrams ->
+                val factor = weightGrams / 100f
+                val entry = FoodEntry(
+                    productName = product.name,
+                    weightGrams = weightGrams,
+                    calories = product.calories * factor,
+                    proteins = product.proteins * factor,
+                    fats = product.fats * factor,
+                    carbs = product.carbs * factor,
+                    date = dateStr
+                )
+                scope.launch {
+                    repository.addFoodEntry(entry)
+                }
+                showAddDialog = false
+            }
+        )
+    }
+
+    // Диалог подтверждения удаления
+    entryToDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { entryToDelete = null },
+            title = {
+                Text(if (lang == AppLanguage.RUSSIAN) "Удалить запись?" else "Delete entry?")
+            },
+            text = {
+                Text(
+                    if (lang == AppLanguage.RUSSIAN)
+                        "Удалить «${entry.productName}» из дневника?"
+                    else
+                        "Remove «${entry.productName}» from the diary?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch { repository.deleteFoodEntry(entry.id) }
+                    entryToDelete = null
+                }) {
+                    Text(
+                        if (lang == AppLanguage.RUSSIAN) "Удалить" else "Delete",
+                        color = Color.Red
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { entryToDelete = null }) {
+                    Text(if (lang == AppLanguage.RUSSIAN) "Отмена" else "Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun NutrientProgressCard(
+    modifier: Modifier = Modifier,
+    label: String,
+    current: Float,
+    norm: Float,
+    unit: String,
+    color: Color
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(32.dp)
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "🏋️",
-                fontSize = 80.sp
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Добро пожаловать!",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = MaterialTheme.colorScheme.onBackground,
-                textAlign = TextAlign.Center
+                text = "%.0f".format(current),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = color
             )
-            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "HypeSportClub",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp
-                ),
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center
+                text = "/ %.0f $unit".format(norm),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Используйте меню навигации для доступа к функциям приложения",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
+            Spacer(modifier = Modifier.height(6.dp))
+            val progress = if (norm > 0) (current / norm).coerceIn(0f, 1f) else 0f
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                color = color,
+                trackColor = color.copy(alpha = 0.2f)
             )
         }
     }
 }
 
 @Composable
-private fun PlaceholderContent(
-    icon: String,
-    title: String,
-    subtitle: String
+private fun FoodEntryCard(
+    entry: FoodEntry,
+    lang: AppLanguage,
+    onDelete: () -> Unit
 ) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = icon,
-                fontSize = 64.sp
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = entry.productName,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "%.0f ${if (lang == AppLanguage.RUSSIAN) "г" else "g"} · %.0f ${if (lang == AppLanguage.RUSSIAN) "ккал" else "kcal"}".format(
+                        entry.weightGrams, entry.calories
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Б: %.1f".format(entry.proteins),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF4CAF50)
+                    )
+                    Text(
+                        text = "Ж: %.1f".format(entry.fats),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFFA726)
+                    )
+                    Text(
+                        text = "У: %.1f".format(entry.carbs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF42A5F5)
+                    )
+                }
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = if (lang == AppLanguage.RUSSIAN) "Удалить" else "Delete",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddFoodDialog(
+    allProducts: List<FoodProduct>,
+    categories: List<String>,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onAdd: (FoodProduct, Float) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var selectedProduct by remember { mutableStateOf<FoodProduct?>(null) }
+    var weightText by remember { mutableStateOf("100") }
+
+    val filteredProducts = remember(searchQuery, selectedCategory, allProducts) {
+        allProducts.filter { product ->
+            (selectedCategory == null || product.category == selectedCategory) &&
+            (searchQuery.isBlank() || product.name.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f),
+        title = {
+            Text(
+                if (lang == AppLanguage.RUSSIAN) "Добавить продукт" else "Add product",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (selectedProduct == null) {
+                    // Поиск
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = {
+                            Text(if (lang == AppLanguage.RUSSIAN) "Поиск продукта..." else "Search product...")
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Очистить")
+                                }
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Фильтр по категориям
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item {
+                            FilterChip(
+                                selected = selectedCategory == null,
+                                onClick = { selectedCategory = null },
+                                label = { Text(if (lang == AppLanguage.RUSSIAN) "Все" else "All", style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                        items(categories.size) { i ->
+                            FilterChip(
+                                selected = selectedCategory == categories[i],
+                                onClick = {
+                                    selectedCategory = if (selectedCategory == categories[i]) null else categories[i]
+                                },
+                                label = { Text(categories[i], style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Список продуктов
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(filteredProducts.size) { idx ->
+                            val product = filteredProducts[idx]
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedProduct = product },
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = product.name,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(
+                                            text = "%.0f ${if (lang == AppLanguage.RUSSIAN) "ккал" else "kcal"}".format(product.calories),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = SportOrange
+                                        )
+                                        Text(
+                                            text = "Б: %.1f".format(product.proteins),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF4CAF50)
+                                        )
+                                        Text(
+                                            text = "Ж: %.1f".format(product.fats),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFFFA726)
+                                        )
+                                        Text(
+                                            text = "У: %.1f".format(product.carbs),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF42A5F5)
+                                        )
+                                    }
+                                    if (product.category.isNotBlank()) {
+                                        Text(
+                                            text = product.category,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Выбранный продукт — ввод веса
+                    val product = selectedProduct!!
+                    val weight = weightText.toFloatOrNull() ?: 0f
+                    val factor = weight / 100f
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = SportOrange.copy(alpha = 0.1f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = product.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { selectedProduct = null }) {
+                                    Text(
+                                        if (lang == AppLanguage.RUSSIAN) "Изменить" else "Change",
+                                        color = SportOrange
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (lang == AppLanguage.RUSSIAN) "На 100 г:" else "Per 100 g:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("%.0f ккал".format(product.calories), style = MaterialTheme.typography.bodySmall, color = SportOrange)
+                                Text("Б: %.1f".format(product.proteins), style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                                Text("Ж: %.1f".format(product.fats), style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFA726))
+                                Text("У: %.1f".format(product.carbs), style = MaterialTheme.typography.bodySmall, color = Color(0xFF42A5F5))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = weightText,
+                        onValueChange = { newVal ->
+                            if (newVal.isEmpty() || newVal.all { c -> c.isDigit() || c == '.' }) {
+                                weightText = newVal
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (lang == AppLanguage.RUSSIAN) "Вес (г)" else "Weight (g)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    if (weight > 0f) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = if (lang == AppLanguage.RUSSIAN)
+                                        "Итого за %.0f г:".format(weight)
+                                    else "Total for %.0f g:".format(weight),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text("%.0f ккал".format(product.calories * factor), style = MaterialTheme.typography.bodySmall, color = SportOrange)
+                                    Text("Б: %.1f г".format(product.proteins * factor), style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                                    Text("Ж: %.1f г".format(product.fats * factor), style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFA726))
+                                    Text("У: %.1f г".format(product.carbs * factor), style = MaterialTheme.typography.bodySmall, color = Color(0xFF42A5F5))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (selectedProduct != null) {
+                val weight = weightText.toFloatOrNull() ?: 0f
+                TextButton(
+                    onClick = {
+                        if (weight > 0f) {
+                            onAdd(selectedProduct!!, weight)
+                        }
+                    },
+                    enabled = weight > 0f
+                ) {
+                    Text(
+                        if (lang == AppLanguage.RUSSIAN) "Добавить" else "Add",
+                        color = if (weight > 0f) SportOrange else Color.Gray
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(if (lang == AppLanguage.RUSSIAN) "Отмена" else "Cancel")
+            }
+        }
+    )
 }
 
 @Composable
 private fun ProfileContent(
     user: User?,
     onPersonalInfoClick: () -> Unit,
-    onHealthDataClick: () -> Unit,
     onSubscriptionsClick: () -> Unit,
     onTrainersClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -1241,16 +2070,6 @@ private fun ProfileContent(
                 title = Strings.personalData(lang),
                 subtitle = Strings.phoneEmailPassword(lang),
                 onClick = onPersonalInfoClick
-            )
-        }
-        
-        // Данные для БЖУ
-        item {
-            ProfileMenuButton(
-                icon = "📊",
-                title = Strings.healthData(lang),
-                subtitle = Strings.genderWeightHeightGoal(lang),
-                onClick = onHealthDataClick
             )
         }
         
@@ -1378,129 +2197,327 @@ private fun ProfileMenuButton(
 @Composable
 private fun PersonalInfoScreen(
     user: User?,
-    onSave: (phone: String, email: String) -> Unit
+    onSave: (phone: String, email: String, weight: Float, height: Float, goal: String) -> Unit
 ) {
-    var phone by remember { mutableStateOf(user?.phone ?: "") }
-    var email by remember { mutableStateOf(user?.email ?: "") }
-    var showPasswordDialog by remember { mutableStateOf(false) }
-    var isSaved by remember { mutableStateOf(false) }
-    
+    val repository = remember { FirebaseRepo.instance }
+    val scope = rememberCoroutineScope()
+
+    var phone by remember(user?.phone) { mutableStateOf(user?.phone ?: "") }
+    var email by remember(user?.email) { mutableStateOf(user?.email ?: "") }
+    var weight by remember(user?.weight) {
+        mutableStateOf(if ((user?.weight ?: 0f) > 0f) user!!.weight.toInt().toString() else "")
+    }
+    var height by remember(user?.height) {
+        mutableStateOf(if ((user?.height ?: 0f) > 0f) user!!.height.toInt().toString() else "")
+    }
+    var selectedGoal by remember(user?.fitnessGoal) { mutableStateOf(user?.userFitnessGoal ?: FitnessGoal.MAINTENANCE) }
+
+    val origPhone = user?.phone ?: ""
+    val origEmail = user?.email ?: ""
+    val origWeight = if ((user?.weight ?: 0f) > 0f) user!!.weight.toInt().toString() else ""
+    val origHeight = if ((user?.height ?: 0f) > 0f) user!!.height.toInt().toString() else ""
+    val origGoal = user?.userFitnessGoal ?: FitnessGoal.MAINTENANCE
+
+    val hasChanges = phone != origPhone || email != origEmail ||
+        weight != origWeight || height != origHeight || selectedGoal != origGoal
+
+    var showPasswordSection by remember { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var successMessage by remember { mutableStateOf<String?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            ProfileInfoCard(label = "ФИО", value = user?.fullName ?: "—", icon = "👤")
+            ProfileInfoCard(label = "Фамилия", value = user?.lastName ?: "—", icon = "👤")
         }
-        
+        item {
+            ProfileInfoCard(label = "Имя", value = user?.firstName ?: "—", icon = "👤")
+        }
+        item {
+            ProfileInfoCard(label = "Отчество", value = user?.middleName ?: "—", icon = "👤")
+        }
         item {
             ProfileInfoCard(label = "Дата рождения", value = user?.birthDate ?: "—", icon = "📅")
         }
-        
         item {
             ProfileInfoCard(label = "Пол", value = user?.userGender?.displayName ?: "Не указан", icon = "⚧")
         }
-        
+
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "📱 Телефон",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = "📱 Телефон", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it; isSaved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        value = phone, onValueChange = { phone = it },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                         placeholder = { Text("+7 (___) ___-__-__") }
                     )
                 }
             }
         }
-        
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "📧 Email",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = "📧 Email", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it.trim(); isSaved = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        value = email, onValueChange = { email = it.trim() },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                         placeholder = { Text("example@mail.com") }
                     )
                 }
             }
         }
-        
+
         item {
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showPasswordDialog = true },
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "🔒", fontSize = 24.sp)
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "Пароль", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(text = "••••••••", style = MaterialTheme.typography.bodyLarge)
-                    }
-                    Text(text = "Изменить", color = SportOrange, fontWeight = FontWeight.Medium)
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "📏 Рост (см)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = height,
+                        onValueChange = { if (it.all { c -> c.isDigit() }) height = it },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("175") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
             }
         }
-        
         item {
-            Button(
-                onClick = { 
-                    onSave(phone, email)
-                    isSaved = true
-                },
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Text(if (isSaved) "✓ Сохранено" else "Сохранить изменения")
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "⚖️ Вес (кг)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = weight,
+                        onValueChange = { if (it.all { c -> c.isDigit() }) weight = it },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("70") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                }
             }
         }
-        
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "🎯 Цель занятий", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    FitnessGoal.entries.forEach { goal ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { selectedGoal = goal }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selectedGoal == goal, onClick = { selectedGoal = goal })
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = goal.displayName, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (hasChanges) {
+            item {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            phone = origPhone; email = origEmail
+                            weight = origWeight; height = origHeight; selectedGoal = origGoal
+                        },
+                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)
+                    ) { Text("Отмена") }
+                    Button(
+                        onClick = {
+                            errorMessage = null
+                            val emailVal = email.trim()
+                            if (emailVal.isNotBlank() && !emailVal.contains("@")) {
+                                errorMessage = "Введите корректный email-адрес"
+                                return@Button
+                            }
+                            val h = height.toIntOrNull() ?: 0
+                            if (height.isNotBlank() && (h < 50 || h > 300)) {
+                                errorMessage = "Рост должен быть от 50 до 300 см"
+                                return@Button
+                            }
+                            val w = weight.toIntOrNull() ?: 0
+                            if (weight.isNotBlank() && (w < 20 || w > 500)) {
+                                errorMessage = "Вес должен быть от 20 до 500 кг"
+                                return@Button
+                            }
+                            onSave(phone, emailVal, weight.toFloatOrNull() ?: 0f, height.toFloatOrNull() ?: 0f, selectedGoal.name)
+                            successMessage = "Данные сохранены"
+                        },
+                        modifier = Modifier.weight(1f), enabled = !isSaving,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
+                    ) { Text("Сохранить", color = Color.White) }
+                }
+            }
+        }
+
+        // Секция изменения пароля
+        item { Spacer(modifier = Modifier.height(4.dp)) }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { showPasswordSection = !showPasswordSection },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "🔒", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Изменить пароль",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.graphicsLayer(rotationZ = if (showPasswordSection) -90f else 90f)
+                    )
+                }
+            }
+        }
+        if (showPasswordSection) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = currentPassword, onValueChange = { currentPassword = it },
+                            label = { Text("Текущий пароль") },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
+                            value = newPassword, onValueChange = { newPassword = it },
+                            label = { Text("Новый пароль") },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
+                            value = confirmNewPassword, onValueChange = { confirmNewPassword = it },
+                            label = { Text("Подтвердите новый пароль") },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    errorMessage = null
+                                    if (newPassword.length < 6) {
+                                        errorMessage = "Новый пароль должен содержать минимум 6 символов"
+                                        return@launch
+                                    }
+                                    if (newPassword != confirmNewPassword) {
+                                        errorMessage = "Пароли не совпадают. Проверьте правильность ввода"
+                                        return@launch
+                                    }
+                                    isSaving = true
+                                    val result = repository.updatePassword(currentPassword, newPassword)
+                                    isSaving = false
+                                    if (result.isSuccess) {
+                                        successMessage = "Пароль успешно изменён"
+                                        currentPassword = ""; newPassword = ""; confirmNewPassword = ""
+                                        showPasswordSection = false
+                                    } else {
+                                        val msg = result.exceptionOrNull()?.message ?: ""
+                                        errorMessage = when {
+                                            msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
+                                            msg.contains("password is invalid", ignoreCase = true) ||
+                                            msg.contains("wrong-password", ignoreCase = true) ->
+                                                "Неверный текущий пароль"
+                                            msg.contains("network", ignoreCase = true) ->
+                                                "Ошибка сети. Проверьте подключение к интернету"
+                                            msg.contains("requires-recent-login", ignoreCase = true) ->
+                                                "Для смены пароля необходимо заново войти в аккаунт"
+                                            else -> "Не удалось сменить пароль. Попробуйте позже"
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = currentPassword.isNotBlank() && newPassword.isNotBlank() && confirmNewPassword.isNotBlank() && !isSaving,
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
+                        ) { Text("Сохранить пароль", color = Color.White) }
+                    }
+                }
+            }
+        }
+
+        if (successMessage != null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = EnergyGreen.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "✓ $successMessage",
+                        modifier = Modifier.padding(16.dp),
+                        color = EnergyGreen, fontWeight = FontWeight.Bold
+                    )
+                }
+                LaunchedEffect(successMessage) { delay(3000); successMessage = null }
+            }
+        }
+        if (errorMessage != null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "✗ $errorMessage",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(32.dp)) }
-    }
-    
-    // Диалог изменения пароля
-    if (showPasswordDialog) {
-        ChangePasswordDialog(onDismiss = { showPasswordDialog = false })
     }
 }
 
@@ -1536,241 +2553,6 @@ private fun ProfileInfoCard(label: String, value: String, icon: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun HealthDataScreen(
-    user: User?,
-    onSave: (gender: String, weight: Float, height: Float, goal: String) -> Unit
-) {
-    var weight by remember { mutableStateOf(if ((user?.weight ?: 0f) > 0) user?.weight.toString() else "") }
-    var height by remember { mutableStateOf(if ((user?.height ?: 0f) > 0) user?.height.toString() else "") }
-    var selectedGoal by remember { mutableStateOf(user?.userFitnessGoal ?: FitnessGoal.MAINTENANCE) }
-    var isSaved by remember { mutableStateOf(false) }
-    
-    val bmi = remember(weight, height) {
-        val w = weight.toFloatOrNull() ?: 0f
-        val h = height.toFloatOrNull() ?: 0f
-        if (w > 0 && h > 0) {
-            val hMeters = h / 100
-            w / (hMeters * hMeters)
-        } else 0f
-    }
-    
-    val bmiCategory = when {
-        bmi <= 0 -> ""
-        bmi < 18.5f -> "Недостаточный вес"
-        bmi < 25f -> "Норма"
-        bmi < 30f -> "Избыточный вес"
-        else -> "Ожирение"
-    }
-    
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Возраст
-        item {
-            ProfileInfoCard(
-                label = "Возраст",
-                value = if ((user?.age ?: 0) > 0) "${user?.age} лет" else "Не указан",
-                icon = "🎂"
-            )
-        }
-        
-        // Вес
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "⚖️ Вес (кг)", style = MaterialTheme.typography.labelLarge)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = weight,
-                        onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) { weight = it; isSaved = false } },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        placeholder = { Text("70") }
-                    )
-                }
-            }
-        }
-        
-        // Рост
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "📏 Рост (см)", style = MaterialTheme.typography.labelLarge)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = height,
-                        onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) { height = it; isSaved = false } },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        placeholder = { Text("175") }
-                    )
-                }
-            }
-        }
-        
-        // ИМТ
-        if (bmi > 0) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = when {
-                            bmi < 18.5f || bmi >= 30f -> MaterialTheme.colorScheme.errorContainer
-                            bmi < 25f -> EnergyGreen.copy(alpha = 0.2f)
-                            else -> MaterialTheme.colorScheme.tertiaryContainer
-                        }
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "📊", fontSize = 24.sp)
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(text = "ИМТ (Индекс массы тела)", style = MaterialTheme.typography.labelMedium)
-                            Text(
-                                text = "%.1f — $bmiCategory".format(bmi),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Цель тренировок
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "🎯 Цель занятий", style = MaterialTheme.typography.labelLarge)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    FitnessGoal.entries.forEach { goal ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedGoal = goal; isSaved = false }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = selectedGoal == goal,
-                                onClick = { selectedGoal = goal; isSaved = false }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = goal.displayName, style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                }
-            }
-        }
-        
-        item {
-            Button(
-                onClick = {
-                    onSave(user?.gender ?: Gender.MALE.name, weight.toFloatOrNull() ?: 0f, height.toFloatOrNull() ?: 0f, selectedGoal.name)
-                    isSaved = true
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
-            ) {
-                Text(if (isSaved) "✓ Сохранено" else "Сохранить изменения")
-            }
-        }
-        
-        item { Spacer(modifier = Modifier.height(32.dp)) }
-    }
-}
-
-// Диалог изменения пароля
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ChangePasswordDialog(onDismiss: () -> Unit) {
-    var currentPassword by remember { mutableStateOf("") }
-    var newPassword by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Изменить пароль", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = currentPassword,
-                    onValueChange = { currentPassword = it; errorMessage = null },
-                    label = { Text("Текущий пароль") },
-                    singleLine = true,
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                OutlinedTextField(
-                    value = newPassword,
-                    onValueChange = { newPassword = it; errorMessage = null },
-                    label = { Text("Новый пароль") },
-                    singleLine = true,
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it; errorMessage = null },
-                    label = { Text("Подтвердите пароль") },
-                    singleLine = true,
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                if (errorMessage != null) {
-                    Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    when {
-                        newPassword.length < 6 -> errorMessage = "Пароль должен быть не менее 6 символов"
-                        newPassword != confirmPassword -> errorMessage = "Пароли не совпадают"
-                        else -> {
-                            // TODO: Реализовать смену пароля через Firebase Auth
-                            onDismiss()
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
-            ) {
-                Text("Сохранить")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        },
-        shape = RoundedCornerShape(20.dp)
-    )
-}
 
 @Composable
 private fun SubscriptionsFullScreen(

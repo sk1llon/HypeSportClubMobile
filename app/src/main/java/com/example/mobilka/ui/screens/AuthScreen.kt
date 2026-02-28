@@ -612,9 +612,9 @@ fun AuthScreen(
                                 errorMessage = "Введите имя"
                                 return@launch
                             }
-                            if (birthDateValue.text.length != 10) {
+                            if (!isValidBirthDate(birthDateValue.text)) {
                                 isLoading = false
-                                errorMessage = "Введите дату рождения в формате ДД.ММ.ГГГГ"
+                                errorMessage = "Введите корректную дату рождения в формате ДД.ММ.ГГГГ"
                                 return@launch
                             }
                             if (password != confirmPassword) {
@@ -639,7 +639,22 @@ fun AuthScreen(
                         isLoading = false
                         result.fold(
                             onSuccess = { onAuthSuccess() },
-                            onFailure = { errorMessage = it.message }
+                            onFailure = { e ->
+                                errorMessage = when {
+                                    e.message?.contains("password is invalid", ignoreCase = true) == true ||
+                                    e.message?.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) == true ->
+                                        "Неверный email или пароль"
+                                    e.message?.contains("no user record", ignoreCase = true) == true ->
+                                        "Пользователь с таким email не найден"
+                                    e.message?.contains("email address is already", ignoreCase = true) == true ->
+                                        "Пользователь с таким email уже зарегистрирован"
+                                    e.message?.contains("network", ignoreCase = true) == true ->
+                                        "Ошибка сети. Проверьте подключение к интернету"
+                                    e.message?.contains("badly formatted", ignoreCase = true) == true ->
+                                        "Введите корректный email-адрес"
+                                    else -> "Ошибка: ${e.message}"
+                                }
+                            }
                         )
                     }
                 },
@@ -700,4 +715,21 @@ private fun TabButton(
             )
         )
     }
+}
+
+private fun isValidBirthDate(dateStr: String): Boolean {
+    if (dateStr.length != 10) return false
+    val parts = dateStr.split(".")
+    if (parts.size != 3) return false
+    val day = parts[0].toIntOrNull() ?: return false
+    val month = parts[1].toIntOrNull() ?: return false
+    val year = parts[2].toIntOrNull() ?: return false
+    if (year < 1900 || year > java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)) return false
+    if (month < 1 || month > 12) return false
+    val maxDay = when (month) {
+        2 -> if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) 29 else 28
+        4, 6, 9, 11 -> 30
+        else -> 31
+    }
+    return day in 1..maxDay
 }
