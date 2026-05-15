@@ -40,6 +40,7 @@ import com.example.mobilka.data.FitnessGoal
 import com.example.mobilka.data.Gender
 import com.example.mobilka.ui.theme.SportOrange
 import com.example.mobilka.ui.theme.SportOrangeDark
+import com.example.mobilka.ui.theme.SportOrangeLight
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,7 +98,7 @@ fun AuthScreen(
                     .clip(RoundedCornerShape(30.dp))
                     .background(
                         Brush.linearGradient(
-                            colors = listOf(SportOrange, SportOrangeDark, SportOrange)
+                            colors = listOf(SportOrange, SportOrangeDark, SportOrangeLight)
                         )
                     ),
                 contentAlignment = Alignment.Center

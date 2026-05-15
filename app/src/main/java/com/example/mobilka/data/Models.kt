@@ -196,6 +196,20 @@ data class UserSubscription(
 object SubscriptionTemplates {
     val defaultSubscriptions = listOf(
         Subscription(
+            id = "trial",
+            name = "Пробный",
+            description = "Попробуйте клуб за минимальную цену",
+            price = 900,
+            durationDays = 7,
+            features = listOf(
+                "Тренажёрный зал",
+                "Раздевалки с душем",
+                "1 групповое занятие"
+            ),
+            iconEmoji = "🎫",
+            active = true
+        ),
+        Subscription(
             id = "basic",
             name = "Базовый",
             description = "Доступ в тренажёрный зал",
@@ -207,6 +221,36 @@ object SubscriptionTemplates {
                 "Шкафчик для вещей"
             ),
             iconEmoji = "💪",
+            active = true
+        ),
+        Subscription(
+            id = "student",
+            name = "Студенческий",
+            description = "Базовый тариф со скидкой для студентов",
+            price = 1800,
+            durationDays = 30,
+            features = listOf(
+                "Тренажёрный зал",
+                "Раздевалки с душем",
+                "Скидка 28%",
+                "При наличии студенческого билета"
+            ),
+            iconEmoji = "🎓",
+            active = true
+        ),
+        Subscription(
+            id = "pool",
+            name = "Бассейн",
+            description = "Только бассейн и водные занятия",
+            price = 2800,
+            durationDays = 30,
+            features = listOf(
+                "Бассейн 25 м",
+                "Аквааэробика",
+                "Раздевалки с душем",
+                "Полотенце включено"
+            ),
+            iconEmoji = "🏊",
             active = true
         ),
         Subscription(
@@ -222,7 +266,23 @@ object SubscriptionTemplates {
                 "Сауна",
                 "Раздевалки с душем"
             ),
-            iconEmoji = "🏊",
+            iconEmoji = "🏋️",
+            active = true
+        ),
+        Subscription(
+            id = "standard_quarterly",
+            name = "Стандарт 3 мес.",
+            description = "Стандартный тариф на квартал со скидкой",
+            price = 10500,
+            durationDays = 90,
+            features = listOf(
+                "Тренажёрный зал",
+                "Групповые программы",
+                "Бассейн",
+                "Сауна",
+                "Скидка 12% по сравнению с ежемесячным"
+            ),
+            iconEmoji = "📅",
             active = true
         ),
         Subscription(
@@ -240,6 +300,23 @@ object SubscriptionTemplates {
                 "Парковка"
             ),
             iconEmoji = "⭐",
+            active = true
+        ),
+        Subscription(
+            id = "premium_halfyear",
+            name = "Премиум 6 мес.",
+            description = "Премиум тариф на полгода — выгодно",
+            price = 36000,
+            durationDays = 180,
+            features = listOf(
+                "Тренажёрный зал 24/7",
+                "Все групповые программы",
+                "Бассейн и СПА",
+                "Персональный тренер (2 занятия/мес)",
+                "Полотенца и напитки",
+                "Скидка 14% по сравнению с ежемесячным"
+            ),
+            iconEmoji = "🌟",
             active = true
         ),
         Subscription(

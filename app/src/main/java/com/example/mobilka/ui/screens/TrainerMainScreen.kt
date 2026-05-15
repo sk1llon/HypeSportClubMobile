@@ -67,6 +67,7 @@ fun TrainerMainScreen(
     
     var currentUser by remember { mutableStateOf<User?>(null) }
     var selectedNavItem by remember { mutableStateOf(TrainerNavItem.SCHEDULE) }
+    var chatResetSignal by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var clients by remember { mutableStateOf<List<User>>(emptyList()) }
     var myWorkouts by remember { mutableStateOf<List<GroupWorkout>>(emptyList()) }
@@ -78,7 +79,11 @@ fun TrainerMainScreen(
     fun refreshAvailability() {
         scope.launch {
             currentUser?.id?.let { userId ->
-                myAvailability = repository.getTrainerAvailability(userId)
+                val ids = if (myTrainerIds.isNotEmpty()) myTrainerIds else setOf(userId)
+                myAvailability = repository.getTrainerAvailabilityForTrainer(
+                    trainerIds = ids,
+                    trainerName = currentUser?.fullName ?: ""
+                )
             }
         }
     }
@@ -106,8 +111,6 @@ fun TrainerMainScreen(
         clients = allUsers.filter { it.isClient }
         
         currentUser?.id?.let { userId ->
-            myAvailability = repository.getTrainerAvailability(userId)
-            
             // Находим все ID тренеров, связанные с этим пользователем
             val allTrainers = repository.getAllTrainers()
             val matchingTrainer = allTrainers.find { it.userId == userId }
@@ -117,6 +120,11 @@ fun TrainerMainScreen(
             val ids = mutableSetOf(userId)
             matchingTrainer?.let { ids.add(it.id) }
             myTrainerIds = ids
+
+            myAvailability = repository.getTrainerAvailabilityForTrainer(
+                trainerIds = ids,
+                trainerName = trainerName
+            )
             
             val allWorkouts = repository.getAllGroupWorkouts()
             // Фильтруем по ID тренера (из trainers коллекции) или по имени тренера
@@ -162,7 +170,23 @@ fun TrainerMainScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = SportOrange
-                )
+                ),
+                actions = {
+                    if (selectedNavItem == TrainerNavItem.PROFILE) {
+                        IconButton(
+                            onClick = {
+                                repository.logout()
+                                onLogout()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = "Выйти из аккаунта",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
             )
         },
         bottomBar = {
@@ -185,7 +209,13 @@ fun TrainerMainScreen(
                             ) 
                         },
                         selected = selectedNavItem == item,
-                        onClick = { selectedNavItem = item },
+                        onClick = {
+                            if (item == TrainerNavItem.CHATS && selectedNavItem == TrainerNavItem.CHATS) {
+                                chatResetSignal++
+                            } else {
+                                selectedNavItem = item
+                            }
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = SportOrange,
                             selectedTextColor = Color.White,
@@ -235,7 +265,8 @@ fun TrainerMainScreen(
                         TrainerChatsScreen(
                             currentUser = currentUser,
                             workouts = myWorkouts,
-                            allUsers = allUsers
+                            allUsers = allUsers,
+                            resetSignal = chatResetSignal
                         )
                     }
                     TrainerNavItem.PROFILE -> {
@@ -836,7 +867,14 @@ private fun AddAvailabilityDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val dateTimestamp = Timestamp(selectedDate.time)
+                    val normalizedDate = Calendar.getInstance().apply {
+                        timeInMillis = selectedDate.timeInMillis
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    val dateTimestamp = Timestamp(normalizedDate.time)
                     val startTime = "${startHour.padStart(2, '0')}:${startMinute.padStart(2, '0')}"
                     val endTime = "${endHour.padStart(2, '0')}:${endMinute.padStart(2, '0')}"
                     
@@ -868,12 +906,17 @@ private fun AddAvailabilityDialog(
 private fun TrainerChatsScreen(
     currentUser: User?,
     workouts: List<GroupWorkout>,
-    allUsers: List<User>
+    allUsers: List<User>,
+    resetSignal: Int
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
     
     var selectedChatClient by remember { mutableStateOf<User?>(null) }
+
+    LaunchedEffect(resetSignal) {
+        selectedChatClient = null
+    }
     
     // Получаем уникальных клиентов из индивидуальных тренировок
     val clientsWithChats = remember(workouts, allUsers) {
@@ -1518,28 +1561,6 @@ private fun TrainerProfileScreen(
             }
         }
 
-        // Кнопка выхода
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable { onLogout() },
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "🚪", fontSize = 24.sp)
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "Выйти из аккаунта",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        }
         item { Spacer(modifier = Modifier.height(32.dp)) }
     }
 }

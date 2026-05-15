@@ -64,6 +64,7 @@ import com.example.mobilka.data.NutritionCalculator
 import com.example.mobilka.ui.theme.EnergyGreen
 import com.example.mobilka.ui.theme.SportOrange
 import com.example.mobilka.ui.theme.SportOrangeDark
+import com.example.mobilka.ui.theme.SportOrangeLight
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -140,10 +141,10 @@ fun SubscriptionsScreen(
     var isLoading by remember { mutableStateOf(true) }
     var showPurchaseDialog by remember { mutableStateOf<Subscription?>(null) }
     var isPurchasing by remember { mutableStateOf(false) }
-    var showSuccessMessage by remember { mutableStateOf(false) }
-    var showWorkoutSignUpSuccess by remember { mutableStateOf(false) }
+    var successDialogMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var selectedNavItem by remember { mutableStateOf(ClientNavItem.HOME) }
+    var chatResetSignal by remember { mutableIntStateOf(0) }
     var trainersList by remember { mutableStateOf<List<Trainer>>(emptyList()) }
     var groupWorkouts by remember { mutableStateOf<List<GroupWorkout>>(emptyList()) }
     
@@ -198,15 +199,15 @@ fun SubscriptionsScreen(
     
     LaunchedEffect(Unit) {
         repository.observeUserSubscriptions().collect { subs ->
-            userSubscriptions = subs
+            if (subs.isNotEmpty() || userSubscriptions.isEmpty()) {
+                userSubscriptions = subs
+            }
         }
     }
     
     LaunchedEffect(Unit) {
         repository.observeAvailableSubscriptions().collect { subs ->
-            if (subs.isNotEmpty()) {
-                availableSubscriptions = subs
-            }
+            availableSubscriptions = subs
         }
     }
     
@@ -284,7 +285,23 @@ fun SubscriptionsScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = SportOrange
-                )
+                ),
+                actions = {
+                    if (selectedNavItem == ClientNavItem.PROFILE) {
+                        IconButton(
+                            onClick = {
+                                repository.logout()
+                                onLogout()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = Strings.logout(lang),
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
             )
         },
         bottomBar = {
@@ -307,7 +324,23 @@ fun SubscriptionsScreen(
                             )
                         },
                         selected = selectedNavItem == item,
-                        onClick = { selectedNavItem = item },
+                        onClick = {
+                            when {
+                                item == ClientNavItem.PROFILE && selectedNavItem == ClientNavItem.PROFILE && currentProfileSection != null -> {
+                                    currentProfileSection = null
+                                }
+                                item == ClientNavItem.CHATS && selectedNavItem == ClientNavItem.CHATS -> {
+                                    chatResetSignal++
+                                }
+                                item == ClientNavItem.WORKOUTS && selectedNavItem == ClientNavItem.WORKOUTS && selectedWorkoutType != WorkoutType.MY_WORKOUTS -> {
+                                    selectedWorkoutType = WorkoutType.MY_WORKOUTS
+                                }
+                                else -> {
+                                    if (item != ClientNavItem.PROFILE) currentProfileSection = null
+                                    selectedNavItem = item
+                                }
+                            }
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = SportOrange,
                             selectedTextColor = Color.White,
@@ -370,7 +403,8 @@ fun SubscriptionsScreen(
                         ClientChatsScreen(
                             currentUser = currentUser,
                             groupWorkouts = groupWorkouts,
-                            lang = lang
+                            lang = lang,
+                            resetSignal = chatResetSignal
                         )
                     }
                     ClientNavItem.WORKOUTS -> {
@@ -391,6 +425,11 @@ fun SubscriptionsScreen(
                                         onWorkoutBooked = {
                                             scope.launch {
                                                 groupWorkouts = repository.getAllGroupWorkouts()
+                                                trainersList = repository.getAllTrainers()
+                                                successDialogMessage = if (lang == AppLanguage.RUSSIAN)
+                                                    "Вы успешно записались на индивидуальную тренировку. Информация о ней будет доступна в разделе «Мои тренировки»."
+                                                else
+                                                    "You have successfully booked an individual workout. Details will be available in My Workouts."
                                             }
                                         }
                                     )
@@ -406,6 +445,10 @@ fun SubscriptionsScreen(
                                                 result.fold(
                                                     onSuccess = {
                                                         groupWorkouts = repository.getAllGroupWorkouts()
+                                                        successDialogMessage = if (lang == AppLanguage.RUSSIAN)
+                                                            "Запись на тренировку отменена"
+                                                        else
+                                                            "Workout sign-up canceled"
                                                     },
                                                     onFailure = { e ->
                                                         errorMessage = e.message
@@ -421,6 +464,10 @@ fun SubscriptionsScreen(
                                                 result.fold(
                                                     onSuccess = {
                                                         groupWorkouts = repository.getAllGroupWorkouts()
+                                                        successDialogMessage = if (lang == AppLanguage.RUSSIAN)
+                                                            "Индивидуальная тренировка отменена"
+                                                        else
+                                                            "Individual workout canceled"
                                                     },
                                                     onFailure = { e ->
                                                         errorMessage = e.message
@@ -450,9 +497,10 @@ fun SubscriptionsScreen(
                                                     onSuccess = {
                                                         // Перезагружаем список тренировок
                                                         groupWorkouts = repository.getAllGroupWorkouts()
-                                                        showWorkoutSignUpSuccess = true
-                                                        delay(3000)
-                                                        showWorkoutSignUpSuccess = false
+                                                        successDialogMessage = if (lang == AppLanguage.RUSSIAN)
+                                                            "Вы успешно записаны на групповую тренировку"
+                                                        else
+                                                            "You have successfully signed up for the group workout"
                                                     },
                                                     onFailure = { e ->
                                                         errorMessage = e.message
@@ -467,6 +515,10 @@ fun SubscriptionsScreen(
                                                     onSuccess = {
                                                         // Перезагружаем список тренировок
                                                         groupWorkouts = repository.getAllGroupWorkouts()
+                                                        successDialogMessage = if (lang == AppLanguage.RUSSIAN)
+                                                            "Запись на групповую тренировку отменена"
+                                                        else
+                                                            "Group workout sign-up canceled"
                                                     },
                                                     onFailure = { e ->
                                                         errorMessage = e.message
@@ -490,10 +542,6 @@ fun SubscriptionsScreen(
                                     onSubscriptionsClick = { currentProfileSection = ProfileSection.SUBSCRIPTIONS },
                                     onTrainersClick = { currentProfileSection = ProfileSection.TRAINERS },
                                     onSettingsClick = { currentProfileSection = ProfileSection.SETTINGS },
-                                    onLogoutClick = {
-                                        repository.logout()
-                                        onLogout()
-                                    },
                                     lang = lang
                                 )
                             }
@@ -534,74 +582,33 @@ fun SubscriptionsScreen(
                 }
             }
             
-            // Сообщение об успешной покупке абонемента
-            AnimatedVisibility(
-                visible = showSuccessMessage,
-                enter = slideInVertically() + fadeIn(),
-                exit = slideOutVertically() + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-            ) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = EnergyGreen
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (lang == AppLanguage.RUSSIAN) "Абонемент успешно оформлен!" else "Subscription purchased successfully!",
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-            
-            // Сообщение об успешной записи на тренировку
-            AnimatedVisibility(
-                visible = showWorkoutSignUpSuccess,
-                enter = slideInVertically() + fadeIn(),
-                exit = slideOutVertically() + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-            ) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = SportOrange
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (lang == AppLanguage.RUSSIAN) "Вы записаны на тренировку!" else "You signed up for workout!",
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
         }
+    }
+
+    successDialogMessage?.let { message ->
+        ActionResultDialog(
+            message = message,
+            lang = lang,
+            onDismiss = { successDialogMessage = null }
+        )
+    }
+
+    errorMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { errorMessage = null },
+            title = {
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "Действие не выполнено" else "Action failed",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { errorMessage = null }) {
+                    Text(if (lang == AppLanguage.RUSSIAN) "ОК" else "OK")
+                }
+            }
+        )
     }
 
     // Диалог подтверждения покупки
@@ -650,11 +657,13 @@ fun SubscriptionsScreen(
                             result.fold(
                                 onSuccess = {
                                     showPurchaseDialog = null
-                                    showSuccessMessage = true
                                     // Обновляем список абонементов
                                     userSubscriptions = repository.getUserSubscriptions()
-                                    delay(3000)
-                                    showSuccessMessage = false
+                                    availableSubscriptions = repository.getAvailableSubscriptions()
+                                    successDialogMessage = if (lang == AppLanguage.RUSSIAN)
+                                        "Абонемент успешно оформлен"
+                                    else
+                                        "Subscription purchased successfully"
                                 },
                                 onFailure = { e ->
                                     errorMessage = "Ошибка: ${e.message}"
@@ -759,6 +768,40 @@ private fun RoleInfoCard(user: User) {
 }
 
 @Composable
+private fun ActionResultDialog(
+    message: String,
+    lang: AppLanguage,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "Готово" else "Done",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = { Text(message) },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text(if (lang == AppLanguage.RUSSIAN) "ОК" else "OK")
+            }
+        }
+    )
+}
+
+@Composable
 private fun SectionHeader(
     title: String,
     subtitle: String
@@ -799,7 +842,8 @@ private fun ActiveSubscriptionCard(
                     Brush.horizontalGradient(
                         colors = listOf(
                             SportOrange.copy(alpha = 0.8f),
-                            SportOrangeDark
+                            SportOrangeDark,
+                            SportOrangeLight
                         )
                     )
                 )
@@ -1139,7 +1183,7 @@ private fun HomeWelcomeContent(
                             .fillMaxWidth()
                             .background(
                                 Brush.horizontalGradient(
-                                    listOf(SportOrange.copy(alpha = 0.85f), SportOrangeDark)
+                                    listOf(SportOrange.copy(alpha = 0.85f), SportOrangeDark, SportOrangeLight)
                                 )
                             )
                     ) {
@@ -1215,7 +1259,7 @@ private fun HomeWelcomeContent(
                 ) {
                     Text(
                         text = "Просмотреть все абонементы",
-                        color = SportOrange,
+                        color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
@@ -1326,7 +1370,7 @@ private fun HomeWelcomeContent(
                 ) {
                     Text(
                         text = "Просмотреть всех тренеров",
-                        color = SportOrange,
+                        color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
@@ -1484,7 +1528,7 @@ private fun NutritionScreen(
                             Text(
                                 text = "%.0f".format(totalCalories),
                                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                                color = SportOrange
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Text(
                                 text = " / %.0f".format(dailyNorm.calories),
@@ -2014,7 +2058,6 @@ private fun ProfileContent(
     onSubscriptionsClick: () -> Unit,
     onTrainersClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onLogoutClick: () -> Unit,
     lang: AppLanguage
 ) {
     LazyColumn(
@@ -2101,39 +2144,6 @@ private fun ProfileContent(
                 subtitle = Strings.themeLanguage(lang),
                 onClick = onSettingsClick
             )
-        }
-        
-        // Выход из аккаунта
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onLogoutClick() },
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "🚪",
-                        fontSize = 24.sp
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = Strings.logout(lang),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
         }
         
         item {
@@ -2554,14 +2564,33 @@ private fun ProfileInfoCard(label: String, value: String, icon: String) {
 }
 
 
+private enum class SubscriptionSort(val label: String) {
+    PRICE_ASC("Цена ↑"),
+    PRICE_DESC("Цена ↓"),
+    DURATION_ASC("Срок ↑"),
+    DURATION_DESC("Срок ↓")
+}
+
 @Composable
 private fun SubscriptionsFullScreen(
     userSubscriptions: List<UserSubscription>,
     availableSubscriptions: List<Subscription>,
     onPurchase: (Subscription) -> Unit
 ) {
-    val hasActiveSubscriptions = userSubscriptions.isNotEmpty()
-    
+    val activeUserSubscriptions = userSubscriptions.filter { !it.isExpired && it.active }
+    val hasActiveSubscriptions = activeUserSubscriptions.isNotEmpty()
+
+    var selectedSort by remember { mutableStateOf(SubscriptionSort.PRICE_ASC) }
+
+    val sortedSubscriptions = remember(availableSubscriptions, selectedSort) {
+        when (selectedSort) {
+            SubscriptionSort.PRICE_ASC     -> availableSubscriptions.sortedBy { it.price }
+            SubscriptionSort.PRICE_DESC    -> availableSubscriptions.sortedByDescending { it.price }
+            SubscriptionSort.DURATION_ASC  -> availableSubscriptions.sortedBy { it.durationDays }
+            SubscriptionSort.DURATION_DESC -> availableSubscriptions.sortedByDescending { it.durationDays }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -2571,20 +2600,18 @@ private fun SubscriptionsFullScreen(
         item {
             SectionHeader(
                 title = if (hasActiveSubscriptions) "Мои абонементы" else "Выберите абонемент",
-                subtitle = if (hasActiveSubscriptions) 
-                    "Ваши активные подписки (${userSubscriptions.size})" 
-                else 
+                subtitle = if (hasActiveSubscriptions)
+                    "Ваши активные подписки (${activeUserSubscriptions.size})"
+                else
                     "У вас пока нет активных абонементов"
             )
         }
 
         if (hasActiveSubscriptions) {
-            // Активные абонементы
-            items(userSubscriptions, key = { it.id }) { subscription ->
+            items(activeUserSubscriptions, key = { it.id }) { subscription ->
                 ActiveSubscriptionCard(subscription = subscription)
             }
-            
-            // Разделитель
+
             item {
                 Spacer(modifier = Modifier.height(8.dp))
                 SectionHeader(
@@ -2592,17 +2619,53 @@ private fun SubscriptionsFullScreen(
                     subtitle = "Продлите или добавьте новые"
                 )
             }
+        } else {
+            item {
+                SectionHeader(
+                    title = "Доступные абонементы",
+                    subtitle = "Выберите подходящий тариф"
+                )
+            }
         }
 
-        // Все доступные абонементы
-        itemsIndexed(availableSubscriptions, key = { _, sub -> sub.id }) { index, subscription ->
+        // Строка сортировки
+        item {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 0.dp)
+            ) {
+                items(SubscriptionSort.entries) { sort ->
+                    val isSelected = sort == selectedSort
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { selectedSort = sort },
+                        label = { Text(sort.label, fontSize = 13.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isSelected,
+                            selectedBorderColor = MaterialTheme.colorScheme.primary,
+                            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                        )
+                    )
+                }
+            }
+        }
+
+        // Отсортированные доступные абонементы
+        itemsIndexed(sortedSubscriptions, key = { _, sub -> sub.id }) { index, subscription ->
             AvailableSubscriptionCard(
                 subscription = subscription,
                 onPurchase = { onPurchase(subscription) },
                 animationDelay = index * 100
             )
         }
-        
+
         item {
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -2745,13 +2808,37 @@ private fun SettingsScreen() {
                             selected = !isDarkTheme,
                             onClick = { settingsManager.setTheme(AppTheme.LIGHT) },
                             label = { Text(Strings.lightTheme(lang)) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                selected = !isDarkTheme,
+                                enabled = true,
+                                selectedBorderColor = MaterialTheme.colorScheme.primary,
+                                borderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
                         FilterChip(
                             selected = isDarkTheme,
                             onClick = { settingsManager.setTheme(AppTheme.DARK) },
                             label = { Text(Strings.darkTheme(lang)) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                selected = isDarkTheme,
+                                enabled = true,
+                                selectedBorderColor = MaterialTheme.colorScheme.primary,
+                                borderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
                     }
                 }
@@ -2782,13 +2869,37 @@ private fun SettingsScreen() {
                             selected = lang == AppLanguage.RUSSIAN,
                             onClick = { settingsManager.setLanguage(AppLanguage.RUSSIAN) },
                             label = { Text("🇷🇺 Русский") },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                selected = lang == AppLanguage.RUSSIAN,
+                                enabled = true,
+                                selectedBorderColor = MaterialTheme.colorScheme.primary,
+                                borderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
                         FilterChip(
                             selected = lang == AppLanguage.ENGLISH,
                             onClick = { settingsManager.setLanguage(AppLanguage.ENGLISH) },
                             label = { Text("🇺🇸 English") },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                selected = lang == AppLanguage.ENGLISH,
+                                enabled = true,
+                                selectedBorderColor = MaterialTheme.colorScheme.primary,
+                                borderColor = MaterialTheme.colorScheme.outline
+                            )
                         )
                     }
                 }
@@ -2883,7 +2994,6 @@ private fun IndividualBookingScreen(
     var selectedHour by remember { mutableIntStateOf(-1) }
     var selectedSlotForHour by remember { mutableStateOf<TrainerAvailability?>(null) }
     var isBooking by remember { mutableStateOf(false) }
-    var showSuccess by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var weekOffset by remember { mutableIntStateOf(0) }
 
@@ -2976,8 +3086,30 @@ private fun IndividualBookingScreen(
         selectedSlotForHour = null
         selectedDateKey = null
         weekOffset = 0
-        availableSlots = repository.getAvailableTrainerSlots(trainer.userId)
-        bookedHours = repository.getBookedIndividualHours(trainer.userId)
+        val trainerIds = listOf(trainer.userId, trainer.id).filter { it.isNotBlank() }.distinct()
+        val now = Calendar.getInstance().time
+        availableSlots = repository.getTrainerAvailabilityForTrainer(
+            trainerIds = trainerIds,
+            trainerName = trainer.fullName
+        ).filter { slot ->
+            val startHour = slot.startTime.split(":").firstOrNull()?.toIntOrNull()
+            val startMinute = slot.startTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
+            if (startHour == null || slot.endTime.isBlank()) {
+                false
+            } else {
+                val slotStart = Calendar.getInstance().apply {
+                    time = slot.date.toDate()
+                    set(Calendar.HOUR_OF_DAY, startHour)
+                    set(Calendar.MINUTE, startMinute)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                slotStart.time.after(now)
+            }
+        }
+        bookedHours = trainerIds
+            .flatMap { repository.getBookedIndividualHours(it) }
+            .toSet()
         isLoadingSlots = false
     }
 
@@ -3083,7 +3215,7 @@ private fun IndividualBookingScreen(
                             Text(text = "📅", fontSize = 40.sp)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = if (lang == AppLanguage.RUSSIAN) "У тренера нет свободного времени"
+                                text = if (lang == AppLanguage.RUSSIAN) "У тренера нет свободных занятий"
                                 else "No available slots",
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,
@@ -3149,7 +3281,7 @@ private fun IndividualBookingScreen(
                                         }
                                     )
                                     .then(
-                                        if (hasSlots && !isPast)
+                                        if (!isPast)
                                             Modifier.clickable {
                                                 selectedDateKey = dk
                                                 selectedHour = -1
@@ -3195,13 +3327,27 @@ private fun IndividualBookingScreen(
                 if (selectedDateKey != null) {
                     if (hourlySlots.isEmpty()) {
                         item {
-                            Text(
-                                text = if (lang == AppLanguage.RUSSIAN)
-                                    "Нет свободного времени на эту дату"
-                                else "No available time slots on this date",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(text = "📅", fontSize = 36.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = if (lang == AppLanguage.RUSSIAN)
+                                            "У тренера нет свободных занятий в этот день"
+                                        else "The trainer has no available sessions on this day",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        textAlign = TextAlign.Center,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     } else {
                         item {
@@ -3255,7 +3401,6 @@ private fun IndividualBookingScreen(
                                         val result = repository.bookIndividualTrainerSlot(slot, user, hour)
                                         isBooking = false
                                         if (result.isSuccess) {
-                                            showSuccess = true
                                             selectedHour = -1
                                             selectedSlotForHour = null
                                             selectedTrainer = null
@@ -3309,31 +3454,25 @@ private fun IndividualBookingScreen(
             }
         }
 
-        if (showSuccess) {
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF4CAF50).copy(alpha = 0.15f)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "✅", fontSize = 24.sp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (lang == AppLanguage.RUSSIAN)
-                                "Вы успешно записаны на тренировку! Она отображается в разделе «Мои тренировки»."
-                            else "You have successfully booked a workout! It appears in 'My Workouts'.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF2E7D32)
-                        )
-                    }
+        item { Spacer(modifier = Modifier.height(80.dp)) }
+    }
+
+    errorMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { errorMessage = null },
+            title = {
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "Действие не выполнено" else "Action failed",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { errorMessage = null }) {
+                    Text(if (lang == AppLanguage.RUSSIAN) "ОК" else "OK")
                 }
             }
-        }
-
-        item { Spacer(modifier = Modifier.height(80.dp)) }
+        )
     }
 }
 
@@ -3545,7 +3684,7 @@ private fun MyWorkoutsScreen(
                         ) {
                             Row {
                                 Text(
-                                    text = "👤 ${workout.trainerName}",
+                                    text = "👤 ${shortFullName(workout.trainerName)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -4072,17 +4211,27 @@ private fun getClientChatId(userId1: String, userId2: String): String {
     return if (userId1 < userId2) "${userId1}_${userId2}" else "${userId2}_${userId1}"
 }
 
+private fun shortFullName(fullName: String): String {
+    val parts = fullName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    return parts.take(2).joinToString(" ").ifBlank { fullName }
+}
+
 @Composable
 private fun ClientChatsScreen(
     currentUser: User?,
     groupWorkouts: List<GroupWorkout>,
-    lang: AppLanguage
+    lang: AppLanguage,
+    resetSignal: Int
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
     
     var selectedChatTrainer by remember { mutableStateOf<Trainer?>(null) }
     var chatTrainers by remember { mutableStateOf<List<Trainer>>(emptyList()) }
+
+    LaunchedEffect(resetSignal) {
+        selectedChatTrainer = null
+    }
     
     // Загружаем тренеров из индивидуальных тренировок клиента
     // Используем коллекцию trainers (доступна клиентам), а не users (закрыта для клиентов)
@@ -4095,7 +4244,7 @@ private fun ClientChatsScreen(
             .distinct()
         
         chatTrainers = allTrainers
-            .filter { it.id in trainerIdsFromWorkouts && it.userId.isNotBlank() }
+            .filter { (it.id in trainerIdsFromWorkouts || it.userId in trainerIdsFromWorkouts) && it.userId.isNotBlank() }
             .distinctBy { it.userId }
     }
     
@@ -4186,7 +4335,7 @@ private fun ClientChatsScreen(
                                 Text(
                                     text = if (lang == AppLanguage.RUSSIAN) "Тренер" else "Trainer",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = SportOrange
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                             
@@ -4280,7 +4429,7 @@ private fun ClientChatDetailScreen(
                     Text(
                         text = if (lang == AppLanguage.RUSSIAN) "Тренер" else "Trainer",
                         style = MaterialTheme.typography.bodySmall,
-                        color = SportOrange
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }

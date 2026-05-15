@@ -13,7 +13,9 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 
 class FirebaseRepository {
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
@@ -443,6 +445,62 @@ class FirebaseRepository {
     }
     
     // ==================== РАСПИСАНИЕ ТРЕНЕРА ====================
+
+    private fun parseAvailabilityDate(value: Any?): Timestamp {
+        return when (value) {
+            is Timestamp -> value
+            is java.util.Date -> Timestamp(value)
+            is String -> {
+                val formats = listOf("yyyy-MM-dd", "dd.MM.yyyy", "yyyy-MM-dd HH:mm", "dd.MM.yyyy HH:mm")
+                val parsed = formats.firstNotNullOfOrNull { pattern ->
+                    try {
+                        SimpleDateFormat(pattern, Locale.getDefault()).parse(value)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                Timestamp(parsed ?: Calendar.getInstance().time)
+            }
+            else -> Timestamp.now()
+        }
+    }
+
+    private fun mapTrainerAvailabilityDocument(doc: com.google.firebase.firestore.DocumentSnapshot): TrainerAvailability {
+        return TrainerAvailability(
+            id = doc.id,
+            trainerId = doc.getString("trainerId") ?: "",
+            trainerName = doc.getString("trainerName") ?: "",
+            date = parseAvailabilityDate(doc.get("date")),
+            startTime = doc.getString("startTime") ?: "",
+            endTime = doc.getString("endTime") ?: "",
+            isAvailable = doc.getBoolean("isAvailable") ?: true,
+            notes = doc.getString("notes") ?: ""
+        )
+    }
+
+    private suspend fun getAllTrainerAvailabilityRaw(): List<TrainerAvailability> {
+        return try {
+            trainerAvailabilityCollection.get().await().documents
+                .map { mapTrainerAvailabilityDocument(it) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun getTrainerAvailabilityForTrainer(
+        trainerIds: Collection<String>,
+        trainerName: String = ""
+    ): List<TrainerAvailability> {
+        val ids = trainerIds.filter { it.isNotBlank() }.toSet()
+        val normalizedName = trainerName.trim()
+        return getAllTrainerAvailabilityRaw()
+            .filter { slot ->
+                (slot.trainerId.isNotBlank() && slot.trainerId in ids) ||
+                    (normalizedName.isNotBlank() && slot.trainerName.trim() == normalizedName)
+            }
+            .distinctBy { slot -> slot.id.ifBlank { "${slot.trainerId}_${slot.trainerName}_${slot.date.seconds}_${slot.startTime}_${slot.endTime}" } }
+            .sortedWith(compareBy({ it.date }, { it.startTime }))
+    }
     
     // Получить расписание тренера
     suspend fun getTrainerAvailability(trainerId: String): List<TrainerAvailability> {
@@ -451,7 +509,7 @@ class FirebaseRepository {
                 .whereEqualTo("trainerId", trainerId)
                 .get()
                 .await()
-            snapshot.documents.mapNotNull { it.toObject(TrainerAvailability::class.java) }
+            snapshot.documents.map { doc -> mapTrainerAvailabilityDocument(doc) }
                 .sortedBy { it.date }
         } catch (e: Exception) {
             emptyList()
@@ -480,7 +538,7 @@ class FirebaseRepository {
                 .whereLessThan("date", endOfDay)
                 .get()
                 .await()
-            snapshot.documents.mapNotNull { it.toObject(TrainerAvailability::class.java) }
+            snapshot.documents.map { doc -> mapTrainerAvailabilityDocument(doc) }
                 .sortedBy { it.startTime }
         } catch (e: Exception) {
             emptyList()
@@ -939,6 +997,37 @@ class FirebaseRepository {
             Result.failure(e)
         }
     }
+
+    private fun mapSubscriptionDocument(doc: com.google.firebase.firestore.DocumentSnapshot): Subscription {
+        val features = (doc.get("features") as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
+        return Subscription(
+            id = doc.id,
+            name = doc.getString("name") ?: "",
+            description = doc.getString("description") ?: "",
+            price = (doc.get("price") as? Number)?.toInt() ?: 0,
+            durationDays = (doc.get("durationDays") as? Number)?.toInt() ?: 0,
+            features = features,
+            iconEmoji = doc.getString("iconEmoji") ?: "🏋️",
+            active = doc.getBoolean("active") ?: true
+        )
+    }
+
+    private fun mapUserSubscriptionDocument(doc: com.google.firebase.firestore.DocumentSnapshot): UserSubscription {
+        val features = (doc.get("subscriptionFeatures") as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
+        return UserSubscription(
+            id = doc.id,
+            userId = doc.getString("userId") ?: "",
+            orderId = doc.getString("orderId") ?: "",
+            subscriptionId = doc.getString("subscriptionId") ?: "",
+            subscriptionName = doc.getString("subscriptionName") ?: "",
+            subscriptionDescription = doc.getString("subscriptionDescription") ?: "",
+            subscriptionIconEmoji = doc.getString("subscriptionIconEmoji") ?: "🏋️",
+            subscriptionFeatures = features,
+            startDate = parseAvailabilityDate(doc.get("startDate")),
+            endDate = parseAvailabilityDate(doc.get("endDate")),
+            active = doc.getBoolean("active") ?: true
+        )
+    }
     
     suspend fun getAvailableSubscriptions(): List<Subscription> {
         return try {
@@ -955,9 +1044,7 @@ class FirebaseRepository {
             
             // Загружаем все абонементы без фильтра по active
             val snapshot = subscriptionsCollection.get().await()
-            val subscriptions = snapshot.documents.mapNotNull { doc ->
-                doc.toObject(Subscription::class.java)?.copy(id = doc.id)
-            }
+            val subscriptions = snapshot.documents.map { doc -> mapSubscriptionDocument(doc) }
             
             // Фильтруем активные локально
             val activeSubscriptions = subscriptions.filter { it.active }
@@ -978,9 +1065,7 @@ class FirebaseRepository {
                     trySend(SubscriptionTemplates.defaultSubscriptions)
                     return@addSnapshotListener
                 }
-                val subscriptions = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Subscription::class.java)?.copy(id = doc.id)
-                } ?: emptyList()
+                val subscriptions = snapshot?.documents?.map { doc -> mapSubscriptionDocument(doc) } ?: emptyList()
                 val activeSubscriptions = subscriptions.filter { it.active }
                 trySend(activeSubscriptions.ifEmpty { SubscriptionTemplates.defaultSubscriptions })
             }
@@ -991,9 +1076,7 @@ class FirebaseRepository {
     suspend fun getAllSubscriptions(): List<Subscription> {
         return try {
             val snapshot = subscriptionsCollection.get().await()
-            snapshot.documents.mapNotNull { doc ->
-                doc.toObject(Subscription::class.java)?.copy(id = doc.id)
-            }
+            snapshot.documents.map { doc -> mapSubscriptionDocument(doc) }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -1057,9 +1140,7 @@ class FirebaseRepository {
                 .whereEqualTo("userId", uid)
                 .get()
                 .await()
-            snapshot.documents.mapNotNull { doc ->
-                doc.toObject(UserSubscription::class.java)?.copy(id = doc.id)
-            }
+            snapshot.documents.map { doc -> mapUserSubscriptionDocument(doc) }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -1078,12 +1159,10 @@ class FirebaseRepository {
             .whereEqualTo("userId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    trySend(emptyList())
+                    error.printStackTrace()
                     return@addSnapshotListener
                 }
-                val subscriptions = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(UserSubscription::class.java)?.copy(id = doc.id)
-                } ?: emptyList()
+                val subscriptions = snapshot?.documents?.map { doc -> mapUserSubscriptionDocument(doc) } ?: emptyList()
                 trySend(subscriptions)
             }
         awaitClose { listener.remove() }
@@ -1106,9 +1185,9 @@ class FirebaseRepository {
             if (existingSubscriptions.documents.isNotEmpty()) {
                 // Найден существующий активный абонемент - продлеваем его
                 val existingDoc = existingSubscriptions.documents.first()
-                val existingSub = existingDoc.toObject(UserSubscription::class.java)
-                
-                if (existingSub != null) {
+                val existingSub = mapUserSubscriptionDocument(existingDoc)
+
+                run {
                     // Вычисляем новую дату окончания: к текущей дате окончания добавляем дни нового абонемента
                     val existingEndDate = existingSub.endDate.toDate()
                     val newEndCalendar = Calendar.getInstance().apply {
