@@ -1,6 +1,7 @@
 package com.example.mobilka.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -34,6 +35,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardOptions
@@ -383,6 +386,8 @@ fun SubscriptionsScreen(
                         HomeWelcomeContent(
                             activeSubscriptions = activeSubscriptions,
                             trainers = trainersList,
+                            groupWorkouts = groupWorkouts,
+                            currentUser = currentUser,
                             onNavigateToSubscriptions = {
                                 currentProfileSection = ProfileSection.SUBSCRIPTIONS
                                 selectedNavItem = ClientNavItem.PROFILE
@@ -1154,16 +1159,206 @@ private fun HomeContent(
 private fun HomeWelcomeContent(
     activeSubscriptions: List<UserSubscription>,
     trainers: List<Trainer>,
+    groupWorkouts: List<GroupWorkout>,
+    currentUser: User?,
     onNavigateToSubscriptions: () -> Unit,
     onNavigateToTrainers: () -> Unit
 ) {
     val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+
+    val repository = remember { FirebaseRepo.instance }
+    val todayStr = remember { java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE) }
+    var todayEntries by remember { mutableStateOf<List<FoodEntry>>(emptyList()) }
+    LaunchedEffect(todayStr) {
+        repository.observeFoodEntries(todayStr).collect { todayEntries = it }
+    }
+
+    val totalCalories = todayEntries.sumOf { it.calories.toDouble() }.toFloat()
+    val totalProteins = todayEntries.sumOf { it.proteins.toDouble() }.toFloat()
+    val totalFats     = todayEntries.sumOf { it.fats.toDouble() }.toFloat()
+    val totalCarbs    = todayEntries.sumOf { it.carbs.toDouble() }.toFloat()
+    val macroSum      = totalProteins + totalFats + totalCarbs
+
+    val now = remember { java.util.Date() }
+    val sevenDaysLater = remember { java.util.Date(now.time + 7L * 24 * 60 * 60 * 1000) }
+    val uid = currentUser?.id ?: ""
+    val upcomingWorkouts = remember(groupWorkouts, uid) {
+        groupWorkouts.filter { w ->
+            val wDate = w.dateTime.toDate()
+            wDate.after(now) && wDate.before(sevenDaysLater) &&
+            ((!w.isIndividual && w.participantIds.contains(uid)) ||
+             (w.isIndividual && w.clientId == uid))
+        }.sortedBy { it.dateTime.toDate() }.take(3)
+    }
+
+    val proteinColor = Color(0xFF4CAF50)
+    val fatsColor    = Color(0xFFFFA726)
+    val carbsColor   = Color(0xFF42A5F5)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Секция «БЖУ сегодня»
+        item {
+            Text(
+                text = "БЖУ сегодня",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        val bgColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                        Canvas(modifier = Modifier.size(110.dp)) {
+                            val strokeWidth = size.minDimension * 0.18f
+                            val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                            val inset = strokeWidth / 2f
+                            val arcSize = androidx.compose.ui.geometry.Size(size.width - 2 * inset, size.height - 2 * inset)
+                            val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+                            if (macroSum > 0f) {
+                                val pAngle = (totalProteins / macroSum) * 360f
+                                val fAngle = (totalFats     / macroSum) * 360f
+                                val cAngle = (totalCarbs    / macroSum) * 360f
+                                drawArc(color = bgColor, startAngle = -90f, sweepAngle = 360f,
+                                    useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+                                var start = -90f
+                                drawArc(color = proteinColor, startAngle = start, sweepAngle = pAngle,
+                                    useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+                                start += pAngle
+                                drawArc(color = fatsColor, startAngle = start, sweepAngle = fAngle,
+                                    useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+                                start += fAngle
+                                drawArc(color = carbsColor, startAngle = start, sweepAngle = cAngle,
+                                    useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+                            } else {
+                                drawArc(color = bgColor, startAngle = -90f, sweepAngle = 360f,
+                                    useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "%.0f".format(totalCalories),
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = proteinColor
+                            )
+                            Text(
+                                text = "ккал",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                        listOf(
+                            Triple("Белки",    "%.0f г".format(totalProteins), proteinColor),
+                            Triple("Жиры",     "%.0f г".format(totalFats),    fatsColor),
+                            Triple("Углеводы", "%.0f г".format(totalCarbs),   carbsColor)
+                        ).forEach { (label, value, color) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
+                                Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                Text(value, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = color)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Секция «Ближайшие тренировки»
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Ближайшие тренировки",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+        }
+        if (upcomingWorkouts.isNotEmpty()) {
+            items(upcomingWorkouts, key = { it.id }) { workout ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(if (workout.isIndividual) "🧍" else "👥", fontSize = 22.sp)
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = workout.name,
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = workout.formattedDateTime,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (workout.trainerName.isNotBlank()) {
+                                Text(
+                                    text = workout.trainerName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "${workout.durationMinutes} мин",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("📅", fontSize = 28.sp)
+                        Text(
+                            text = "Нет ближайших тренировок на неделю",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
         // Секция абонементов
         item {
             Text(
@@ -1350,8 +1545,8 @@ private fun HomeWelcomeContent(
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = specText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = SportOrange,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                        color = Color(0xFF4CAF50),
                                         textAlign = TextAlign.Center,
                                         maxLines = 2
                                     )
@@ -1413,7 +1608,7 @@ private fun loadFoodProducts(context: android.content.Context): List<FoodProduct
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NutritionScreen(
+internal fun NutritionScreen(
     currentUser: User?,
     lang: AppLanguage
 ) {
@@ -1528,7 +1723,7 @@ private fun NutritionScreen(
                             Text(
                                 text = "%.0f".format(totalCalories),
                                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
+                                color = Color(0xFF4CAF50)
                             )
                             Text(
                                 text = " / %.0f".format(dailyNorm.calories),
@@ -2728,9 +2923,8 @@ private fun TrainersScreen(trainers: List<Trainer>) {
                             )
                             Text(
                                 text = trainer.trainerSpecialization.displayName,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Medium
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = Color(0xFF4CAF50)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Row {
@@ -2738,16 +2932,15 @@ private fun TrainersScreen(trainers: List<Trainer>) {
                                     Text(
                                         text = "📅 ${trainer.experienceText}",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
                                 }
                                 if (trainer.pricePerTraining > 0) {
                                     Text(
                                         text = "💰 ${trainer.pricePerTraining} ₽",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = SportOrange,
-                                        fontWeight = FontWeight.Bold
+                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFFFFA726)
                                     )
                                 }
                             }
@@ -2756,7 +2949,7 @@ private fun TrainersScreen(trainers: List<Trainer>) {
                                 Text(
                                     text = "🏅 $specText",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = Color(0xFF4CAF50)
                                 )
                             }
                         }
@@ -4334,8 +4527,8 @@ private fun ClientChatsScreen(
                                 )
                                 Text(
                                     text = if (lang == AppLanguage.RUSSIAN) "Тренер" else "Trainer",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = Color(0xFF4CAF50)
                                 )
                             }
                             
@@ -4345,7 +4538,7 @@ private fun ClientChatsScreen(
                                         modifier = Modifier
                                             .size(10.dp)
                                             .clip(CircleShape)
-                                            .background(SportOrange)
+                                            .background(Color(0xFF4CAF50))
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }

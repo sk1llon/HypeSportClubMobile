@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -28,15 +29,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.mobilka.data.AppLanguage
 import com.example.mobilka.data.ChatMessage
 import com.example.mobilka.data.FirebaseRepo
 import com.example.mobilka.data.GroupWorkout
+import com.example.mobilka.data.SettingsManager
 import com.example.mobilka.data.Trainer
 import com.example.mobilka.data.TrainerAvailability
 import com.example.mobilka.data.User
@@ -53,6 +57,7 @@ enum class TrainerNavItem(
     val icon: ImageVector
 ) {
     SCHEDULE("Расписание", Icons.Default.Home),
+    BJU("БЖУ", Icons.Default.List),
     CHATS("Чаты", Icons.Default.Email),
     PROFILE("Профиль", Icons.Default.Person)
 }
@@ -140,8 +145,13 @@ fun TrainerMainScreen(
         name.ifBlank { "Тренер" }
     } ?: "Тренер"
     
+    val context = LocalContext.current
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    val lang by settingsManager.language.collectAsState()
+
     val topBarTitle = when (selectedNavItem) {
         TrainerNavItem.SCHEDULE -> "Моё расписание"
+        TrainerNavItem.BJU -> "БЖУ калькулятор"
         TrainerNavItem.CHATS -> "Чаты"
         TrainerNavItem.PROFILE -> "Профиль"
     }
@@ -259,6 +269,12 @@ fun TrainerMainScreen(
                                     refreshAvailability()
                                 }
                             }
+                        )
+                    }
+                    TrainerNavItem.BJU -> {
+                        NutritionScreen(
+                            currentUser = currentUser,
+                            lang = lang
                         )
                     }
                     TrainerNavItem.CHATS -> {
