@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -36,6 +37,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.rememberLazyListState
+import coil.compose.AsyncImage
 import com.example.mobilka.data.AppLanguage
 import com.example.mobilka.data.ChatMessage
 import com.example.mobilka.data.FirebaseRepo
@@ -1082,14 +1089,58 @@ private fun ChatScreen(
     val chatId = remember { getChatId(currentUser?.id ?: "", otherUser.id) }
     var messageText by remember { mutableStateOf("") }
     val messages by repository.observeChatMessages(chatId).collectAsState(initial = emptyList())
-    
-    // Помечаем сообщения как прочитанные
-    // Помечаем только входящие непрочитанные сообщения; ключ — количество таких сообщений,
-    // чтобы LaunchedEffect не перезапускался при обновлении isRead (избегаем отмены корутины)
+    val listState = rememberLazyListState()
+    var isUploadingImage by remember { mutableStateOf(false) }
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                isUploadingImage = true
+                val path = "chat_images/$chatId/${System.currentTimeMillis()}.jpg"
+                val result = repository.uploadImage(uri, path)
+                result.onSuccess { url ->
+                    repository.sendMessage(
+                        chatId = chatId,
+                        senderId = currentUser?.id ?: "",
+                        senderName = currentUser?.fullName ?: "",
+                        text = "",
+                        imageUrl = url
+                    )
+                }
+                isUploadingImage = false
+            }
+        }
+    }
+
     val incomingUnread = messages.count { !it.isRead && it.senderId != currentUser?.id }
     LaunchedEffect(chatId, incomingUnread) {
         if (incomingUnread > 0) {
             repository.markMessagesAsRead(chatId, currentUser?.id ?: "")
+        }
+    }
+
+    val showScrollToBottom by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 }
+    }
+
+    if (previewImageUrl != null) {
+        Dialog(onDismissRequest = { previewImageUrl = null }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { previewImageUrl = null },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = previewImageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            }
         }
     }
     
@@ -1133,63 +1184,41 @@ private fun ChatScreen(
             }
         }
         
-        // Сообщения
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            reverseLayout = true,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
-        ) {
-            items(messages.reversed()) { message ->
-                val isMyMessage = message.senderId == currentUser?.id
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (isMyMessage) Arrangement.End else Arrangement.Start
+        Box(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                items(messages.reversed()) { message ->
+                    val isMyMessage = message.senderId == currentUser?.id
+                    ChatMessageBubble(
+                        message = message,
+                        isMyMessage = isMyMessage,
+                        onImageClick = { previewImageUrl = it }
+                    )
+                }
+            }
+
+            if (showScrollToBottom) {
+                FloatingActionButton(
+                    onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                        .size(40.dp),
+                    containerColor = SportOrange,
+                    contentColor = Color.White
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isMyMessage) 16.dp else 4.dp,
-                            bottomEnd = if (isMyMessage) 4.dp else 16.dp
-                        ),
-                        color = if (isMyMessage) SportOrange else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.widthIn(max = 280.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = message.text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isMyMessage) Color.White else MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.align(Alignment.End),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Text(
-                                    text = message.formattedTime,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isMyMessage) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                if (isMyMessage) {
-                                    Text(
-                                        text = if (message.isRead) "✓✓" else "✓",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        color = if (message.isRead)
-                                            Color.White
-                                        else
-                                            Color.White.copy(alpha = 0.5f)
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = null,
+                        modifier = Modifier.graphicsLayer(rotationZ = -90f)
+                    )
                 }
             }
         }
@@ -1206,6 +1235,16 @@ private fun ChatScreen(
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = { imagePicker.launch("image/*") },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    if (isUploadingImage) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = SportOrange)
+                    } else {
+                        Text("📎", fontSize = 20.sp)
+                    }
+                }
                 OutlinedTextField(
                     value = messageText,
                     onValueChange = { messageText = it },
@@ -1253,6 +1292,29 @@ private fun TrainerProfileScreen(
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+    var trainerDoc by remember { mutableStateOf<com.example.mobilka.data.Trainer?>(null) }
+
+    LaunchedEffect(user?.id) {
+        if (user?.id != null) {
+            trainerDoc = repository.getTrainerByUserId(user.id)
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null && user != null) {
+            scope.launch {
+                isUploadingPhoto = true
+                val path = "profile_photos/${user.id}/avatar.jpg"
+                val result = repository.uploadImage(uri, path)
+                result.onSuccess { url ->
+                    repository.updateUserPhotoUrl(user.id, url)
+                    trainerDoc?.id?.let { tid -> repository.updateTrainerPhotoUrl(tid, url) }
+                }
+                isUploadingPhoto = false
+            }
+        }
+    }
 
     var email by remember(user?.email) { mutableStateOf(user?.email ?: "") }
     var phone by remember(user?.phone) { mutableStateOf(user?.phone ?: "") }
@@ -1282,6 +1344,9 @@ private fun TrainerProfileScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
 
+    val photoUrl = user?.photoUrl?.takeIf { it.isNotBlank() }
+        ?: trainerDoc?.photoUrl?.takeIf { it.isNotBlank() }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -1293,15 +1358,47 @@ private fun TrainerProfileScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(
-                    modifier = Modifier.size(96.dp).clip(CircleShape).background(SportOrange),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = user?.firstName?.firstOrNull()?.uppercase() ?: "?",
-                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White
-                    )
+                Box(modifier = Modifier.size(104.dp), contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .clip(CircleShape)
+                            .background(SportOrange)
+                            .clickable { photoPickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (photoUrl != null) {
+                            AsyncImage(
+                                model = photoUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                            )
+                        } else {
+                            Text(
+                                text = user?.firstName?.firstOrNull()?.uppercase() ?: "?",
+                                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                        if (isUploadingPhoto) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(SportOrange)
+                            .clickable { photoPickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("📷", fontSize = 14.sp)
+                    }
                 }
             }
         }

@@ -74,6 +74,13 @@ import java.text.SimpleDateFormat
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Locale
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 
 // Элементы навигации для клиента
 enum class ClientNavItem(val icon: ImageVector) {
@@ -2255,6 +2262,25 @@ private fun ProfileContent(
     onSettingsClick: () -> Unit,
     lang: AppLanguage
 ) {
+    val repository = remember { FirebaseRepo.instance }
+    val scope = rememberCoroutineScope()
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null && user != null) {
+            scope.launch {
+                isUploadingPhoto = true
+                val result = repository.uploadImage(uri, "profile_photos/${user.id}/avatar.jpg")
+                result.onSuccess { url ->
+                    repository.updateUserPhotoUrl(user.id, url)
+                }
+                isUploadingPhoto = false
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -2276,26 +2302,55 @@ private fun ProfileContent(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
-                        modifier = Modifier
-                            .size(80.dp)
-                            .clip(CircleShape)
-                            .background(SportOrange),
-                        contentAlignment = Alignment.Center
+                        modifier = Modifier.size(88.dp),
+                        contentAlignment = Alignment.BottomEnd
                     ) {
-                        Text(
-                            text = user?.firstName?.firstOrNull()?.uppercase() ?: "?",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = Color.White
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .clip(CircleShape)
+                                .background(SportOrange)
+                                .clickable { photoPickerLauncher.launch("image/*") },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!user?.photoUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = user!!.photoUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else {
+                                Text(
+                                    text = user?.firstName?.firstOrNull()?.uppercase() ?: "?",
+                                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                            }
+                        }
+                        if (isUploadingPhoto) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp).align(Alignment.Center),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(SportOrange)
+                                    .clickable { photoPickerLauncher.launch("image/*") },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📷", fontSize = 14.sp)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = user?.fullName ?: Strings.user(lang),
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
-                        )
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                     )
                 }
             }
@@ -2907,12 +2962,21 @@ private fun TrainersScreen(trainers: List<Trainer>) {
                                 .background(MaterialTheme.colorScheme.tertiary),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp
-                            )
+                            if (trainer.photoUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = trainer.photoUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else {
+                                Text(
+                                    text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 28.sp
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -2950,6 +3014,15 @@ private fun TrainersScreen(trainers: List<Trainer>) {
                                     text = "🏅 $specText",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFF4CAF50)
+                                )
+                            }
+                            if (trainer.description.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = trainer.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 3
                                 )
                             }
                         }
@@ -4572,11 +4645,58 @@ private fun ClientChatDetailScreen(
     val chatId = remember(currentUser?.id, otherUserId) { getClientChatId(currentUser?.id ?: "", otherUserId) }
     var messageText by remember { mutableStateOf("") }
     val messages by repository.observeChatMessages(chatId).collectAsState(initial = emptyList())
-    
+    val listState = rememberLazyListState()
+    var isUploadingImage by remember { mutableStateOf(false) }
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                isUploadingImage = true
+                val path = "chat_images/$chatId/${System.currentTimeMillis()}.jpg"
+                val result = repository.uploadImage(uri, path)
+                result.onSuccess { url ->
+                    repository.sendMessage(
+                        chatId = chatId,
+                        senderId = currentUser?.id ?: "",
+                        senderName = currentUser?.fullName ?: "",
+                        text = "",
+                        imageUrl = url
+                    )
+                }
+                isUploadingImage = false
+            }
+        }
+    }
+
     val incomingUnread = messages.count { !it.isRead && it.senderId != currentUser?.id }
     LaunchedEffect(chatId, incomingUnread) {
         if (incomingUnread > 0) {
             repository.markMessagesAsRead(chatId, currentUser?.id ?: "")
+        }
+    }
+
+    val showScrollToBottom by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 }
+    }
+
+    if (previewImageUrl != null) {
+        Dialog(onDismissRequest = { previewImageUrl = null }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { previewImageUrl = null },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = previewImageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            }
         }
     }
     
@@ -4628,63 +4748,42 @@ private fun ClientChatDetailScreen(
             }
         }
         
-        // Сообщения
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            reverseLayout = true,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
-        ) {
-            items(messages.reversed()) { message ->
-                val isMyMessage = message.senderId == currentUser?.id
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (isMyMessage) Arrangement.End else Arrangement.Start
+        Box(modifier = Modifier.weight(1f)) {
+            // Сообщения
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                items(messages.reversed()) { message ->
+                    val isMyMessage = message.senderId == currentUser?.id
+                    ChatMessageBubble(
+                        message = message,
+                        isMyMessage = isMyMessage,
+                        onImageClick = { previewImageUrl = it }
+                    )
+                }
+            }
+
+            if (showScrollToBottom) {
+                FloatingActionButton(
+                    onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                        .size(40.dp),
+                    containerColor = SportOrange,
+                    contentColor = Color.White
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isMyMessage) 16.dp else 4.dp,
-                            bottomEnd = if (isMyMessage) 4.dp else 16.dp
-                        ),
-                        color = if (isMyMessage) SportOrange else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.widthIn(max = 280.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = message.text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isMyMessage) Color.White else MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.align(Alignment.End),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Text(
-                                    text = message.formattedTime,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isMyMessage) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                if (isMyMessage) {
-                                    Text(
-                                        text = if (message.isRead) "✓✓" else "✓",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        color = if (message.isRead)
-                                            Color.White
-                                        else
-                                            Color.White.copy(alpha = 0.5f)
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = null,
+                        modifier = Modifier.graphicsLayer(rotationZ = -90f)
+                    )
                 }
             }
         }
@@ -4701,6 +4800,16 @@ private fun ClientChatDetailScreen(
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = { imagePicker.launch("image/*") },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    if (isUploadingImage) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = SportOrange)
+                    } else {
+                        Text("📎", fontSize = 20.sp)
+                    }
+                }
                 OutlinedTextField(
                     value = messageText,
                     onValueChange = { messageText = it },
@@ -4737,6 +4846,73 @@ private fun ClientChatDetailScreen(
                         contentDescription = if (lang == AppLanguage.RUSSIAN) "Отправить" else "Send",
                         tint = Color.White
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ChatMessageBubble(
+    message: ChatMessage,
+    isMyMessage: Boolean,
+    onImageClick: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMyMessage) Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = if (isMyMessage) 16.dp else 4.dp,
+                bottomEnd = if (isMyMessage) 4.dp else 16.dp
+            ),
+            color = if (isMyMessage) SportOrange else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.widthIn(max = 280.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                if (message.imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = message.imageUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onImageClick(message.imageUrl) }
+                    )
+                    if (message.text.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+                if (message.text.isNotBlank()) {
+                    Text(
+                        text = message.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isMyMessage) Color.White else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = message.formattedTime,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isMyMessage) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (isMyMessage) {
+                        Text(
+                            text = if (message.isRead) "✓✓" else "✓",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = if (message.isRead) Color.White else Color.White.copy(alpha = 0.5f)
+                        )
+                    }
                 }
             }
         }

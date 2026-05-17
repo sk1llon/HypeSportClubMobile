@@ -59,10 +59,11 @@ data class User(
     val gender: String = Gender.MALE.name,
     val weight: Float = 0f,         // Вес в кг
     val height: Float = 0f,         // Рост в см
-    val fitnessGoal: String = FitnessGoal.MAINTENANCE.name
+    val fitnessGoal: String = FitnessGoal.MAINTENANCE.name,
+    val photoUrl: String = ""       // URL фото профиля
 ) {
     // Пустой конструктор для Firestore
-    constructor() : this("", "", "", "", "", "", "", UserRole.CLIENT.name, Timestamp.now(), Gender.MALE.name, 0f, 0f, FitnessGoal.MAINTENANCE.name)
+    constructor() : this("", "", "", "", "", "", "", UserRole.CLIENT.name, Timestamp.now(), Gender.MALE.name, 0f, 0f, FitnessGoal.MAINTENANCE.name, "")
     
     val userRole: UserRole
         get() = UserRole.fromString(role)
@@ -369,14 +370,15 @@ data class Trainer(
     val email: String = "",
     val phone: String = "",
     val experience: Int = 0,        // Стаж в годах
-    val specialization: String = TrainerSpecialization.FITNESS.name, // Основная специализация (для обратной совместимости)
-    val specializations: List<String> = emptyList(), // Список всех специализаций
+    val specialization: String = TrainerSpecialization.FITNESS.name,
+    val specializations: List<String> = emptyList(),
     val achievements: List<String> = emptyList(),
     val pricePerTraining: Int = 0,  // Цена за тренировку
     val photoUrl: String = "",      // URL фото
+    val description: String = "",   // Описание тренера
     val createdAt: Timestamp = Timestamp.now()
 ) {
-    constructor() : this("", "", "", "", "", "", "", "", 0, TrainerSpecialization.FITNESS.name, emptyList(), emptyList(), 0, "", Timestamp.now())
+    constructor() : this("", "", "", "", "", "", "", "", 0, TrainerSpecialization.FITNESS.name, emptyList(), emptyList(), 0, "", "", Timestamp.now())
     
     val fullName: String
         get() = listOf(lastName, firstName, middleName)
@@ -488,14 +490,15 @@ data class TrainerAvailability(
 data class ChatMessage(
     @DocumentId
     val id: String = "",
-    val chatId: String = "",         // ID чата (trainerId_clientId)
-    val senderId: String = "",       // ID отправителя
-    val senderName: String = "",     // ФИО отправителя
+    val chatId: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
     val text: String = "",
+    val imageUrl: String = "",       // URL прикреплённого изображения
     val timestamp: Timestamp = Timestamp.now(),
     val isRead: Boolean = false
 ) {
-    constructor() : this("", "", "", "", "", Timestamp.now(), false)
+    constructor() : this("", "", "", "", "", "", Timestamp.now(), false)
     
     val formattedTime: String
         get() {

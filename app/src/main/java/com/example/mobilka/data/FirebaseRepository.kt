@@ -1,6 +1,7 @@
 package com.example.mobilka.data
 
 import android.content.Context
+import android.net.Uri
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.Timestamp
@@ -9,6 +10,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -20,6 +22,7 @@ import java.util.Locale
 class FirebaseRepository {
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val storage: FirebaseStorage = FirebaseStorage.getInstance()
     
     // Коллекции
     private val usersCollection = firestore.collection("users")
@@ -276,6 +279,17 @@ class FirebaseRepository {
             emptyList()
         }
     }
+
+    suspend fun getTrainerByUserId(userId: String): Trainer? {
+        return try {
+            val snapshot = trainersCollection.whereEqualTo("userId", userId).get().await()
+            snapshot.documents.firstOrNull()?.let { doc ->
+                doc.toObject(Trainer::class.java)?.copy(id = doc.id)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
     
     // Добавить тренера
     suspend fun addTrainer(trainer: Trainer): Result<String> {
@@ -290,9 +304,11 @@ class FirebaseRepository {
                 "phone" to trainer.phone,
                 "experience" to trainer.experience,
                 "specialization" to trainer.specialization,
+                "specializations" to trainer.specializations,
                 "achievements" to trainer.achievements,
                 "pricePerTraining" to trainer.pricePerTraining,
                 "photoUrl" to trainer.photoUrl,
+                "description" to trainer.description,
                 "createdAt" to Timestamp.now()
             )
             val docRef = trainersCollection.add(data).await()
@@ -596,18 +612,51 @@ class FirebaseRepository {
     private val chatMessagesCollection = firestore.collection("chats")
     
     // Отправить сообщение
-    suspend fun sendMessage(chatId: String, senderId: String, senderName: String, text: String): Result<String> {
+    suspend fun sendMessage(chatId: String, senderId: String, senderName: String, text: String, imageUrl: String = ""): Result<String> {
         return try {
             val data = hashMapOf(
                 "chatId" to chatId,
                 "senderId" to senderId,
                 "senderName" to senderName,
                 "text" to text,
+                "imageUrl" to imageUrl,
                 "timestamp" to Timestamp.now(),
                 "isRead" to false
             )
             val docRef = chatMessagesCollection.add(data).await()
             Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Загрузить изображение в Firebase Storage и вернуть download URL
+    suspend fun uploadImage(uri: Uri, path: String): Result<String> {
+        return try {
+            val ref = storage.reference.child(path)
+            ref.putFile(uri).await()
+            val url = ref.downloadUrl.await().toString()
+            Result.success(url)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Обновить photoUrl пользователя (клиент)
+    suspend fun updateUserPhotoUrl(userId: String, photoUrl: String): Result<Unit> {
+        return try {
+            usersCollection.document(userId).update("photoUrl", photoUrl).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Обновить photoUrl тренера (запись в коллекции trainers)
+    suspend fun updateTrainerPhotoUrl(trainerId: String, photoUrl: String): Result<Unit> {
+        return try {
+            trainersCollection.document(trainerId).update("photoUrl", photoUrl).await()
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

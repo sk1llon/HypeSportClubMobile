@@ -1,5 +1,8 @@
 package com.example.mobilka.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -22,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -33,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.mobilka.data.AppLanguage
 import com.example.mobilka.data.AppTheme
 import com.example.mobilka.data.FirebaseRepo
@@ -73,9 +78,9 @@ data class TrainerFormData(
     val experience: Int = 0,
     val specializations: List<TrainerSpecialization> = listOf(TrainerSpecialization.FITNESS),
     val pricePerTraining: Int = 0,
-    val photoUrl: String = ""
+    val photoUrl: String = "",
+    val description: String = ""
 ) {
-    // Для обратной совместимости - основная специализация
     val specialization: TrainerSpecialization
         get() = specializations.firstOrNull() ?: TrainerSpecialization.FITNESS
 }
@@ -479,7 +484,8 @@ fun AdminScreen(
                                                         specialization = trainerData.specialization.name,
                                                         specializations = trainerData.specializations.map { it.name },
                                                         pricePerTraining = trainerData.pricePerTraining,
-                                                        photoUrl = trainerData.photoUrl
+                                                        photoUrl = trainerData.photoUrl,
+                                                        description = trainerData.description
                                                     )
                                                     val trainerResult = repository.addTrainer(trainer)
                                                     if (trainerResult.isFailure) {
@@ -505,6 +511,10 @@ fun AdminScreen(
                                                     birthDate = birthDate,
                                                     gender = gender
                                                 )
+
+                                                if (photoUrl.isNotBlank()) {
+                                                    repository.updateUserPhotoUrl(newUserId, photoUrl)
+                                                }
                                                 
                                                 successMessage = Strings.userCreated(lang)
                                                 addUserSelectedRole = null
@@ -2128,13 +2138,25 @@ private fun AddUserFullScreen(
     var birthDateValue by remember { mutableStateOf(TextFieldValue("")) }
     var birthDateError by remember { mutableStateOf(false) }
     var selectedGender by remember { mutableStateOf(Gender.MALE) }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
     var photoUrl by remember { mutableStateOf("") }
+    var isUploadingPhoto by remember { mutableStateOf(false) }
     
     // Дополнительные поля для тренера
     var experience by remember { mutableStateOf("") }
     var selectedSpecializations by remember { mutableStateOf(setOf(TrainerSpecialization.FITNESS)) }
     var pricePerTraining by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var trainerDescription by remember { mutableStateOf("") }
+
+    val scope = rememberCoroutineScope()
+    val repository = remember { FirebaseRepo.instance }
+
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            photoUri = uri
+        }
+    }
     
     // Сбрасываем форму при смене роли
     LaunchedEffect(selectedRole) {
@@ -2146,10 +2168,12 @@ private fun AddUserFullScreen(
         birthDateValue = TextFieldValue("")
         selectedGender = Gender.MALE
         photoUrl = ""
+        photoUri = null
         experience = ""
         selectedSpecializations = setOf(TrainerSpecialization.FITNESS)
         pricePerTraining = ""
         phone = ""
+        trainerDescription = ""
     }
     
     if (selectedRole == null) {
@@ -2420,17 +2444,45 @@ private fun AddUserFullScreen(
                     }
                 }
                 
-                // Поле для фото URL
+                // Выбор фото
                 item {
-                    OutlinedTextField(
-                        value = photoUrl,
-                        onValueChange = { photoUrl = it },
-                        label = { Text(Strings.photoUrl(lang)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(96.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { photoPicker.launch("image/*") },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (photoUri != null) {
+                                AsyncImage(
+                                    model = photoUri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else if (photoUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = photoUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else {
+                                Text("📷", fontSize = 32.sp)
+                            }
+                        }
+                        Text(
+                            text = Strings.photoUrl(lang),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 
                 // Дополнительные поля для тренера
@@ -2542,11 +2594,24 @@ private fun AddUserFullScreen(
                             }
                         }
                     }
+
+                    // Описание тренера
+                    item {
+                        OutlinedTextField(
+                            value = trainerDescription,
+                            onValueChange = { trainerDescription = it },
+                            label = { Text(if (lang == AppLanguage.RUSSIAN) "Описание тренера" else "Trainer description") },
+                            placeholder = { Text(if (lang == AppLanguage.RUSSIAN) "Расскажите о тренере..." else "Tell about the trainer...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            minLines = 3,
+                            maxLines = 6
+                        )
+                    }
                 }
                 
                 item { Spacer(modifier = Modifier.height(16.dp)) }
-            }
-            
+            }            
             // Кнопки внизу
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -2568,13 +2633,25 @@ private fun AddUserFullScreen(
                     
             Button(
                 onClick = { 
-                            val trainerData = if (selectedRole == UserRole.TRAINER) {
+                            scope.launch {
+                                var uploadedPhotoUrl = photoUrl
+                                if (photoUri != null) {
+                                    isUploadingPhoto = true
+                                    val result = repository.uploadImage(
+                                        photoUri!!,
+                                        "admin_uploads/${System.currentTimeMillis()}.jpg"
+                                    )
+                                    result.onSuccess { url -> uploadedPhotoUrl = url }
+                                    isUploadingPhoto = false
+                                }
+                                val trainerData = if (selectedRole == UserRole.TRAINER) {
                                 TrainerFormData(
                                     phone = phone,
                                     experience = experience.toIntOrNull() ?: 0,
                                     specializations = selectedSpecializations.toList(),
                                     pricePerTraining = pricePerTraining.toIntOrNull() ?: 0,
-                                    photoUrl = photoUrl
+                                    photoUrl = uploadedPhotoUrl,
+                                    description = trainerDescription
                                 )
                             } else null
                             
@@ -2588,14 +2665,19 @@ private fun AddUserFullScreen(
                                 selectedGender.name,
                                 selectedRole, 
                                 trainerData,
-                                photoUrl
+                                uploadedPhotoUrl
                             )
+                            }
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = isFormValid,
+                        enabled = isFormValid && !isUploadingPhoto,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(Strings.create(lang))
+                        if (isUploadingPhoto) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            Text(Strings.create(lang))
+                        }
                     }
                 }
             }
