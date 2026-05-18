@@ -1,7 +1,10 @@
 package com.example.mobilka.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.Timestamp
@@ -15,6 +18,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -52,14 +56,13 @@ class FirebaseRepository {
         gender: String = Gender.MALE.name,
         height: Float = 0f,
         weight: Float = 0f,
-        fitnessGoal: String = FitnessGoal.MAINTENANCE.name
+        fitnessGoal: String = FitnessGoal.MAINTENANCE.name,
+        photoUrl: String = ""
     ): Result<FirebaseUser> {
         return try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
             val user = result.user ?: throw Exception("Не удалось создать пользователя")
             
-            // Создаём документ пользователя в Firestore (всегда как CLIENT)
-            // Не сохраняем id, так как @DocumentId автоматически заполняется из document ID
             val userData = hashMapOf(
                 "email" to email,
                 "phone" to "",
@@ -72,6 +75,7 @@ class FirebaseRepository {
                 "height" to height,
                 "weight" to weight,
                 "fitnessGoal" to fitnessGoal,
+                "photoUrl" to photoUrl,
                 "createdAt" to Timestamp.now()
             )
             usersCollection.document(user.uid).set(userData).await()
@@ -1446,4 +1450,56 @@ class FirebaseRepository {
 // Синглтон для доступа к репозиторию
 object FirebaseRepo {
     val instance: FirebaseRepository by lazy { FirebaseRepository() }
+}
+
+/**
+ * Конвертирует Uri изображения в data URL (data:image/jpeg;base64,...).
+ * Масштабирует по большей стороне до [maxSide] px, сжимает в JPEG.
+ * Должна вызываться в фоновом потоке (Dispatchers.IO).
+ */
+fun uriToDataUrl(context: Context, uri: Uri, maxSide: Int = 200): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val original = BitmapFactory.decodeStream(inputStream)
+        inputStream.close()
+        original ?: return null
+
+        val w = original.width
+        val h = original.height
+        val bitmap = if (maxOf(w, h) > maxSide) {
+            val scale = maxSide.toFloat() / maxOf(w, h)
+            Bitmap.createScaledBitmap(
+                original,
+                (w * scale).toInt().coerceAtLeast(1),
+                (h * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else original
+
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        val encoded = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        "data:image/jpeg;base64,$encoded"
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/**
+ * Преобразует data URL в ByteArray для Coil.
+ * Если строка — обычный HTTP URL, возвращает её как есть.
+ * Если пустая — возвращает null (AsyncImage ничего не покажет).
+ */
+fun photoUriModel(photoUrl: String?): Any? {
+    if (photoUrl.isNullOrBlank()) return null
+    return if (photoUrl.startsWith("data:") && photoUrl.contains("base64,")) {
+        try {
+            val base64Part = photoUrl.substringAfter("base64,")
+            Base64.decode(base64Part, Base64.DEFAULT)
+        } catch (e: Exception) {
+            photoUrl
+        }
+    } else {
+        photoUrl
+    }
 }

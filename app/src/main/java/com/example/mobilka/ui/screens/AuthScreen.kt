@@ -1,12 +1,17 @@
 package com.example.mobilka.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextRange
@@ -35,13 +41,17 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.mobilka.data.FirebaseRepo
 import com.example.mobilka.data.FitnessGoal
 import com.example.mobilka.data.Gender
+import com.example.mobilka.data.uriToDataUrl
 import com.example.mobilka.ui.theme.SportOrange
 import com.example.mobilka.ui.theme.SportOrangeDark
 import com.example.mobilka.ui.theme.SportOrangeLight
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +70,7 @@ fun AuthScreen(
     var height by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
     var selectedFitnessGoal by remember { mutableStateOf(FitnessGoal.MAINTENANCE) }
+    var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var passwordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
@@ -68,6 +79,11 @@ fun AuthScreen(
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val repository = remember { FirebaseRepo.instance }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? -> if (uri != null) selectedPhotoUri = uri }
 
     Box(
         modifier = Modifier
@@ -523,10 +539,10 @@ fun AuthScreen(
             ) {
                 Column {
                     Spacer(modifier = Modifier.height(12.dp))
-                    
+
                     OutlinedTextField(
                         value = confirmPassword,
-                        onValueChange = { 
+                        onValueChange = {
                             confirmPassword = it
                             errorMessage = null
                         },
@@ -554,6 +570,63 @@ fun AuthScreen(
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                         )
                     )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "Фото профиля (необязательно)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { photoPickerLauncher.launch("image/*") },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedPhotoUri != null) {
+                                AsyncImage(
+                                    model = selectedPhotoUri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else {
+                                Text("📷", fontSize = 28.sp)
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = if (selectedPhotoUri != null) "Фото выбрано" else "Нажмите, чтобы выбрать фото",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (selectedPhotoUri != null)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (selectedPhotoUri != null) {
+                                TextButton(
+                                    onClick = { selectedPhotoUri = null },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text(
+                                        text = "Убрать фото",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
             
@@ -623,7 +696,7 @@ fun AuthScreen(
                                 errorMessage = "Пароли не совпадают"
                                 return@launch
                             }
-                            repository.register(
+                            val registerResult = repository.register(
                                 email = email,
                                 password = password,
                                 lastName = lastName,
@@ -635,6 +708,18 @@ fun AuthScreen(
                                 weight = weight.toFloatOrNull() ?: 0f,
                                 fitnessGoal = selectedFitnessGoal.name
                             )
+                            // После успешной регистрации — конвертируем фото в base64 и сохраняем в Firestore
+                            if (registerResult.isSuccess) {
+                                val uid = registerResult.getOrNull()?.uid
+                                val uri = selectedPhotoUri
+                                if (uid != null && uri != null) {
+                                    val dataUrl = withContext(Dispatchers.IO) {
+                                        uriToDataUrl(context, uri, maxSide = 200)
+                                    }
+                                    if (dataUrl != null) repository.updateUserPhotoUrl(uid, dataUrl)
+                                }
+                            }
+                            registerResult
                         }
                         
                         isLoading = false

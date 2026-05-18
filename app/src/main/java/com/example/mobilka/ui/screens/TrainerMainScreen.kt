@@ -46,6 +46,10 @@ import coil.compose.AsyncImage
 import com.example.mobilka.data.AppLanguage
 import com.example.mobilka.data.ChatMessage
 import com.example.mobilka.data.FirebaseRepo
+import com.example.mobilka.data.photoUriModel
+import com.example.mobilka.data.uriToDataUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.mobilka.data.GroupWorkout
 import com.example.mobilka.data.SettingsManager
 import com.example.mobilka.data.Trainer
@@ -1093,19 +1097,19 @@ private fun ChatScreen(
     var isUploadingImage by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
 
+    val chatContext = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
                 isUploadingImage = true
-                val path = "chat_images/$chatId/${System.currentTimeMillis()}.jpg"
-                val result = repository.uploadImage(uri, path)
-                result.onSuccess { url ->
+                val dataUrl = withContext(Dispatchers.IO) { uriToDataUrl(chatContext, uri, maxSide = 600) }
+                if (dataUrl != null) {
                     repository.sendMessage(
                         chatId = chatId,
                         senderId = currentUser?.id ?: "",
                         senderName = currentUser?.fullName ?: "",
                         text = "",
-                        imageUrl = url
+                        imageUrl = dataUrl
                     )
                 }
                 isUploadingImage = false
@@ -1133,7 +1137,7 @@ private fun ChatScreen(
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
-                    model = previewImageUrl,
+                    model = photoUriModel(previewImageUrl),
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -1292,8 +1296,11 @@ private fun TrainerProfileScreen(
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
-    var isUploadingPhoto by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     var trainerDoc by remember { mutableStateOf<com.example.mobilka.data.Trainer?>(null) }
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+    val currentUser by rememberUpdatedState(user)
+    val currentTrainerDoc by rememberUpdatedState(trainerDoc)
 
     LaunchedEffect(user?.id) {
         if (user?.id != null) {
@@ -1301,15 +1308,17 @@ private fun TrainerProfileScreen(
         }
     }
 
-    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null && user != null) {
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        val u = currentUser
+        if (uri != null && u != null) {
             scope.launch {
                 isUploadingPhoto = true
-                val path = "profile_photos/${user.id}/avatar.jpg"
-                val result = repository.uploadImage(uri, path)
-                result.onSuccess { url ->
-                    repository.updateUserPhotoUrl(user.id, url)
-                    trainerDoc?.id?.let { tid -> repository.updateTrainerPhotoUrl(tid, url) }
+                val dataUrl = withContext(Dispatchers.IO) { uriToDataUrl(context, uri, maxSide = 200) }
+                if (dataUrl != null) {
+                    repository.updateUserPhotoUrl(u.id, dataUrl)
+                    currentTrainerDoc?.id?.let { tid -> repository.updateTrainerPhotoUrl(tid, dataUrl) }
                 }
                 isUploadingPhoto = false
             }
@@ -1367,9 +1376,10 @@ private fun TrainerProfileScreen(
                             .clickable { photoPickerLauncher.launch("image/*") },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (photoUrl != null) {
+                        val avatarModel = photoUriModel(photoUrl)
+                        if (avatarModel != null) {
                             AsyncImage(
-                                model = photoUrl,
+                                model = avatarModel,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize().clip(CircleShape)
@@ -1383,21 +1393,23 @@ private fun TrainerProfileScreen(
                         }
                         if (isUploadingPhoto) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(32.dp),
                                 strokeWidth = 2.dp,
                                 color = Color.White
                             )
                         }
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(SportOrange)
-                            .clickable { photoPickerLauncher.launch("image/*") },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("📷", fontSize = 14.sp)
+                    if (!isUploadingPhoto) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(SportOrange)
+                                .clickable { photoPickerLauncher.launch("image/*") },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("📷", fontSize = 14.sp)
+                        }
                     }
                 }
             }

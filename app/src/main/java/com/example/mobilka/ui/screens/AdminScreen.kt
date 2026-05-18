@@ -38,6 +38,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.mobilka.data.uriToDataUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.mobilka.data.AppLanguage
 import com.example.mobilka.data.AppTheme
 import com.example.mobilka.data.FirebaseRepo
@@ -2151,13 +2154,12 @@ private fun AddUserFullScreen(
 
     val scope = rememberCoroutineScope()
     val repository = remember { FirebaseRepo.instance }
+    val context = LocalContext.current
 
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
-            photoUri = uri
-        }
+        if (uri != null) photoUri = uri
     }
-    
+
     // Сбрасываем форму при смене роли
     LaunchedEffect(selectedRole) {
         email = ""
@@ -2167,8 +2169,8 @@ private fun AddUserFullScreen(
         middleName = ""
         birthDateValue = TextFieldValue("")
         selectedGender = Gender.MALE
-        photoUrl = ""
         photoUri = null
+        photoUrl = ""
         experience = ""
         selectedSpecializations = setOf(TrainerSpecialization.FITNESS)
         pricePerTraining = ""
@@ -2444,7 +2446,7 @@ private fun AddUserFullScreen(
                     }
                 }
                 
-                // Выбор фото
+                // Фото профиля — выбор из галереи
                 item {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -2459,22 +2461,14 @@ private fun AddUserFullScreen(
                                 .clickable { photoPicker.launch("image/*") },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (photoUri != null) {
-                                AsyncImage(
+                            when {
+                                photoUri != null -> AsyncImage(
                                     model = photoUri,
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize().clip(CircleShape)
                                 )
-                            } else if (photoUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = photoUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
-                            } else {
-                                Text("📷", fontSize = 32.sp)
+                                else -> Text("📷", fontSize = 32.sp)
                             }
                         }
                         Text(
@@ -2634,16 +2628,15 @@ private fun AddUserFullScreen(
             Button(
                 onClick = { 
                             scope.launch {
-                                var uploadedPhotoUrl = photoUrl
+                                isUploadingPhoto = true
+                                var uploadedPhotoUrl = ""
                                 if (photoUri != null) {
-                                    isUploadingPhoto = true
-                                    val result = repository.uploadImage(
-                                        photoUri!!,
-                                        "admin_uploads/${System.currentTimeMillis()}.jpg"
-                                    )
-                                    result.onSuccess { url -> uploadedPhotoUrl = url }
-                                    isUploadingPhoto = false
+                                    val dataUrl = withContext(Dispatchers.IO) {
+                                        uriToDataUrl(context, photoUri!!, maxSide = 200)
+                                    }
+                                    if (dataUrl != null) uploadedPhotoUrl = dataUrl
                                 }
+                                isUploadingPhoto = false
                                 val trainerData = if (selectedRole == UserRole.TRAINER) {
                                 TrainerFormData(
                                     phone = phone,

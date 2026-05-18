@@ -68,8 +68,12 @@ import com.example.mobilka.ui.theme.EnergyGreen
 import com.example.mobilka.ui.theme.SportOrange
 import com.example.mobilka.ui.theme.SportOrangeDark
 import com.example.mobilka.ui.theme.SportOrangeLight
+import com.example.mobilka.data.photoUriModel
+import com.example.mobilka.data.uriToDataUrl
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
@@ -94,7 +98,7 @@ enum class ClientNavItem(val icon: ImageVector) {
         HOME -> Strings.home(lang)
         CALCULATOR -> Strings.calculator(lang)
         CHATS -> Strings.chats(lang)
-        WORKOUTS -> Strings.workouts(lang)
+        WORKOUTS -> if (lang == AppLanguage.RUSSIAN) "Занятия" else "Workouts"
         PROFILE -> Strings.profile(lang)
     }
 }
@@ -2264,18 +2268,19 @@ private fun ProfileContent(
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var isUploadingPhoto by remember { mutableStateOf(false) }
+    val currentUser by rememberUpdatedState(user)
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        if (uri != null && user != null) {
+        val u = currentUser
+        if (uri != null && u != null) {
             scope.launch {
                 isUploadingPhoto = true
-                val result = repository.uploadImage(uri, "profile_photos/${user.id}/avatar.jpg")
-                result.onSuccess { url ->
-                    repository.updateUserPhotoUrl(user.id, url)
-                }
+                val dataUrl = withContext(Dispatchers.IO) { uriToDataUrl(context, uri, maxSide = 200) }
+                if (dataUrl != null) repository.updateUserPhotoUrl(u.id, dataUrl)
                 isUploadingPhoto = false
             }
         }
@@ -2287,7 +2292,6 @@ private fun ProfileContent(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            // Аватар и ФИО
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -2313,9 +2317,10 @@ private fun ProfileContent(
                                 .clickable { photoPickerLauncher.launch("image/*") },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (!user?.photoUrl.isNullOrBlank()) {
+                            val avatarModel = photoUriModel(user?.photoUrl)
+                            if (avatarModel != null) {
                                 AsyncImage(
-                                    model = user!!.photoUrl,
+                                    model = avatarModel,
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize().clip(CircleShape)
@@ -2327,14 +2332,15 @@ private fun ProfileContent(
                                     color = Color.White
                                 )
                             }
+                            if (isUploadingPhoto) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                            }
                         }
-                        if (isUploadingPhoto) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp).align(Alignment.Center),
-                                strokeWidth = 2.dp,
-                                color = Color.White
-                            )
-                        } else {
+                        if (!isUploadingPhoto) {
                             Box(
                                 modifier = Modifier
                                     .size(28.dp)
@@ -4649,19 +4655,19 @@ private fun ClientChatDetailScreen(
     var isUploadingImage by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
 
+    val chatContext = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
                 isUploadingImage = true
-                val path = "chat_images/$chatId/${System.currentTimeMillis()}.jpg"
-                val result = repository.uploadImage(uri, path)
-                result.onSuccess { url ->
+                val dataUrl = withContext(Dispatchers.IO) { uriToDataUrl(chatContext, uri, maxSide = 600) }
+                if (dataUrl != null) {
                     repository.sendMessage(
                         chatId = chatId,
                         senderId = currentUser?.id ?: "",
                         senderName = currentUser?.fullName ?: "",
                         text = "",
-                        imageUrl = url
+                        imageUrl = dataUrl
                     )
                 }
                 isUploadingImage = false
@@ -4689,7 +4695,7 @@ private fun ClientChatDetailScreen(
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
-                    model = previewImageUrl,
+                    model = photoUriModel(previewImageUrl),
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -4875,7 +4881,7 @@ internal fun ChatMessageBubble(
             Column(modifier = Modifier.padding(12.dp)) {
                 if (message.imageUrl.isNotBlank()) {
                     AsyncImage(
-                        model = message.imageUrl,
+                        model = photoUriModel(message.imageUrl),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
