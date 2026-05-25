@@ -32,8 +32,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,6 +92,8 @@ fun TrainerMainScreen(
     var myAvailability by remember { mutableStateOf<List<TrainerAvailability>>(emptyList()) }
     var allUsers by remember { mutableStateOf<List<User>>(emptyList()) }
     var myTrainerIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var unreadChatDialogs by remember { mutableIntStateOf(0) }
+    var showLogoutConfirm by remember { mutableStateOf(false) }
     
     // Функция для обновления расписания
     fun refreshAvailability() {
@@ -150,6 +154,23 @@ fun TrainerMainScreen(
         }
         isLoading = false
     }
+
+    suspend fun refreshUnreadDialogs() {
+        val userId = currentUser?.id ?: return
+        val clientIds = myWorkouts
+            .filter { it.isIndividualWorkout && it.clientId.isNotBlank() }
+            .map { it.clientId }
+            .distinct()
+
+        unreadChatDialogs = clientIds.sumOf { clientId ->
+            val chatId = getChatId(userId, clientId)
+            repository.getUnreadMessageCount(chatId, userId)
+        }
+    }
+
+    LaunchedEffect(currentUser?.id, myWorkouts, chatResetSignal, selectedNavItem) {
+        refreshUnreadDialogs()
+    }
     
     val displayName = currentUser?.let { user ->
         val name = "${user.firstName} ${user.lastName}".trim()
@@ -195,10 +216,7 @@ fun TrainerMainScreen(
                 actions = {
                     if (selectedNavItem == TrainerNavItem.PROFILE) {
                         IconButton(
-                            onClick = {
-                                repository.logout()
-                                onLogout()
-                            }
+                            onClick = { showLogoutConfirm = true }
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ExitToApp,
@@ -218,10 +236,21 @@ fun TrainerMainScreen(
                 TrainerNavItem.entries.forEach { item ->
                     NavigationBarItem(
                         icon = {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.label
-                            )
+                            if (item == TrainerNavItem.CHATS && unreadChatDialogs > 0) {
+                                BadgedBox(
+                                    badge = { Badge { Text(unreadChatDialogs.toString()) } }
+                                ) {
+                                    Icon(
+                                        imageVector = item.icon,
+                                        contentDescription = item.label
+                                    )
+                                }
+                            } else {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = item.label
+                                )
+                            }
                         },
                         label = { 
                             Text(
@@ -293,21 +322,30 @@ fun TrainerMainScreen(
                             currentUser = currentUser,
                             workouts = myWorkouts,
                             allUsers = allUsers,
-                            resetSignal = chatResetSignal
+                            resetSignal = chatResetSignal,
+                            onUnreadDialogsChanged = { unreadChatDialogs = it }
                         )
                     }
                     TrainerNavItem.PROFILE -> {
                         TrainerProfileScreen(
                             user = currentUser,
-                            onLogout = {
-                                repository.logout()
-                                onLogout()
-                            }
+                            onLogout = { showLogoutConfirm = true }
                         )
                     }
                 }
             }
         }
+    }
+
+    if (showLogoutConfirm) {
+        LogoutConfirmDialog(
+            onDismiss = { showLogoutConfirm = false },
+            onConfirm = {
+                showLogoutConfirm = false
+                repository.logout()
+                onLogout()
+            }
+        )
     }
 }
 
@@ -934,7 +972,8 @@ private fun TrainerChatsScreen(
     currentUser: User?,
     workouts: List<GroupWorkout>,
     allUsers: List<User>,
-    resetSignal: Int
+    resetSignal: Int,
+    onUnreadDialogsChanged: (Int) -> Unit
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
@@ -954,12 +993,26 @@ private fun TrainerChatsScreen(
         
         allUsers.filter { it.id in clientIds }
     }
+
+    suspend fun refreshUnreadDialogs() {
+        val userId = currentUser?.id ?: return
+        val unreadDialogs = clientsWithChats.sumOf { client ->
+            val chatId = getChatId(userId, client.id)
+            repository.getUnreadMessageCount(chatId, userId)
+        }
+        onUnreadDialogsChanged(unreadDialogs)
+    }
+
+    LaunchedEffect(clientsWithChats, currentUser?.id, resetSignal) {
+        refreshUnreadDialogs()
+    }
     
     if (selectedChatClient != null) {
         // Экран чата
         ChatScreen(
             currentUser = currentUser,
             otherUser = selectedChatClient!!,
+            onUnreadStateChanged = { scope.launch { refreshUnreadDialogs() } },
             onBack = { selectedChatClient = null }
         )
     } else {
@@ -1020,20 +1073,12 @@ private fun TrainerChatsScreen(
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(SportOrange),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = client.firstName.firstOrNull()?.uppercase() ?: "?",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 20.sp
-                                )
-                            }
+                            AvatarImage(
+                                photoUrl = client.photoUrl,
+                                fallbackText = client.firstName.firstOrNull()?.uppercase() ?: "?",
+                                modifier = Modifier.size(56.dp),
+                                fontSize = 20
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -1085,17 +1130,21 @@ private fun getChatId(userId1: String, userId2: String): String {
 private fun ChatScreen(
     currentUser: User?,
     otherUser: User,
+    onUnreadStateChanged: () -> Unit,
     onBack: () -> Unit
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
     
     val chatId = remember { getChatId(currentUser?.id ?: "", otherUser.id) }
-    var messageText by remember { mutableStateOf("") }
+    var messageText by remember { mutableStateOf(TextFieldValue("")) }
     val messages by repository.observeChatMessages(chatId).collectAsState(initial = emptyList())
     val listState = rememberLazyListState()
     var isUploadingImage by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    var selectedMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var pendingDeleteMessage by remember { mutableStateOf<ChatMessage?>(null) }
 
     val chatContext = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -1121,6 +1170,7 @@ private fun ChatScreen(
     LaunchedEffect(chatId, incomingUnread) {
         if (incomingUnread > 0) {
             repository.markMessagesAsRead(chatId, currentUser?.id ?: "")
+            onUnreadStateChanged()
         }
     }
 
@@ -1147,6 +1197,38 @@ private fun ChatScreen(
             }
         }
     }
+
+    selectedMessage?.let { message ->
+        ChatMessageActionsDialog(
+            message = message,
+            currentUserId = currentUser?.id ?: "",
+            onDismiss = { selectedMessage = null },
+            onEdit = {
+                selectedMessage = null
+                editingMessage = message
+                messageText = TextFieldValue(
+                    text = message.text,
+                    selection = TextRange(message.text.length)
+                )
+            },
+            onDelete = {
+                selectedMessage = null
+                pendingDeleteMessage = message
+            }
+        )
+    }
+
+    pendingDeleteMessage?.let { message ->
+        ConfirmDeleteChatMessageDialog(
+            onDismiss = { pendingDeleteMessage = null },
+            onConfirm = {
+                pendingDeleteMessage = null
+                scope.launch {
+                    repository.deleteChatMessage(message.id, currentUser?.id ?: "")
+                }
+            }
+        )
+    }
     
     Column(modifier = Modifier.fillMaxSize()) {
         // Шапка чата
@@ -1167,19 +1249,12 @@ private fun ChatScreen(
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(SportOrange),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = otherUser.firstName.firstOrNull()?.uppercase() ?: "?",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                AvatarImage(
+                    photoUrl = otherUser.photoUrl,
+                    fallbackText = otherUser.firstName.firstOrNull()?.uppercase() ?: "?",
+                    modifier = Modifier.size(40.dp),
+                    fontSize = 16
+                )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = otherUser.fullName,
@@ -1203,7 +1278,8 @@ private fun ChatScreen(
                     ChatMessageBubble(
                         message = message,
                         isMyMessage = isMyMessage,
-                        onImageClick = { previewImageUrl = it }
+                        onImageClick = { previewImageUrl = it },
+                        onMessageClick = { selectedMessage = message }
                     )
                 }
             }
@@ -1233,56 +1309,92 @@ private fun ChatScreen(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 3.dp
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(12.dp)
             ) {
-                IconButton(
-                    onClick = { imagePicker.launch("image/*") },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    if (isUploadingImage) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = SportOrange)
-                    } else {
-                        Text("📎", fontSize = 20.sp)
+                if (editingMessage != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Редактирование сообщения",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                editingMessage = null
+                                messageText = TextFieldValue("")
+                            }
+                        ) {
+                            Text("Отмена")
+                        }
                     }
                 }
-                OutlinedTextField(
-                    value = messageText,
-                    onValueChange = { messageText = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Сообщение...") },
-                    shape = RoundedCornerShape(24.dp),
-                    maxLines = 4
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        if (messageText.isNotBlank()) {
-                            val text = messageText.trim()
-                            messageText = ""
-                            scope.launch {
-                                repository.sendMessage(
-                                    chatId = chatId,
-                                    senderId = currentUser?.id ?: "",
-                                    senderName = currentUser?.fullName ?: "",
-                                    text = text
-                                )
-                            }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { imagePicker.launch("image/*") },
+                        modifier = Modifier.size(40.dp),
+                        enabled = editingMessage == null
+                    ) {
+                        if (isUploadingImage) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = SportOrange)
+                        } else {
+                            Text("📎", fontSize = 20.sp)
                         }
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(SportOrange)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Отправить",
-                        tint = Color.White
+                    }
+                    OutlinedTextField(
+                        value = messageText,
+                        onValueChange = { messageText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Сообщение...") },
+                        shape = RoundedCornerShape(24.dp),
+                        maxLines = 4
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            if (messageText.text.isNotBlank()) {
+                                val text = messageText.text.trim()
+                                val messageToEdit = editingMessage
+                                messageText = TextFieldValue("")
+                                editingMessage = null
+                                scope.launch {
+                                    if (messageToEdit != null) {
+                                        repository.updateChatMessageText(
+                                            messageId = messageToEdit.id,
+                                            senderId = currentUser?.id ?: "",
+                                            newText = text
+                                        )
+                                    } else {
+                                        repository.sendMessage(
+                                            chatId = chatId,
+                                            senderId = currentUser?.id ?: "",
+                                            senderName = currentUser?.fullName ?: "",
+                                            text = text
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(SportOrange)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Отправить",
+                            tint = Color.White
+                        )
+                    }
                 }
             }
         }

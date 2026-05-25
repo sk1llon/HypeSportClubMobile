@@ -39,9 +39,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,8 +66,10 @@ import com.example.mobilka.data.UserRole
 import com.example.mobilka.data.UserSubscription
 import com.example.mobilka.data.FoodEntry
 import com.example.mobilka.data.FoodProduct
+import com.example.mobilka.data.MealType
 import com.example.mobilka.data.DailyNorm
 import com.example.mobilka.data.NutritionCalculator
+import com.example.mobilka.data.CHAT_MESSAGE_EDIT_WINDOW_MS
 import com.example.mobilka.ui.theme.EnergyGreen
 import com.example.mobilka.ui.theme.SportOrange
 import com.example.mobilka.ui.theme.SportOrangeDark
@@ -75,6 +81,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
 import java.util.Locale
@@ -101,6 +108,64 @@ enum class ClientNavItem(val icon: ImageVector) {
         WORKOUTS -> if (lang == AppLanguage.RUSSIAN) "Занятия" else "Workouts"
         PROFILE -> Strings.profile(lang)
     }
+}
+
+@Composable
+internal fun AvatarImage(
+    photoUrl: String?,
+    fallbackText: String,
+    modifier: Modifier,
+    backgroundColor: Color = SportOrange,
+    fontSize: Int = 20
+) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(backgroundColor),
+        contentAlignment = Alignment.Center
+    ) {
+        val avatarModel = photoUriModel(photoUrl)
+        if (avatarModel != null) {
+            AsyncImage(
+                model = avatarModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+            )
+        } else {
+            Text(
+                text = fallbackText,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = fontSize.sp
+            )
+        }
+    }
+}
+
+@Composable
+internal fun LogoutConfirmDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Выйти из аккаунта?") },
+        text = { Text("Вы уверены, что хотите выйти из аккаунта?") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Выйти")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
 }
 
 // Разделы профиля
@@ -159,6 +224,9 @@ fun SubscriptionsScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var selectedNavItem by remember { mutableStateOf(ClientNavItem.HOME) }
     var chatResetSignal by remember { mutableIntStateOf(0) }
+    var unreadChatDialogs by remember { mutableIntStateOf(0) }
+    var subscriptionsScrollToTopSignal by remember { mutableIntStateOf(0) }
+    var showLogoutConfirm by remember { mutableStateOf(false) }
     var trainersList by remember { mutableStateOf<List<Trainer>>(emptyList()) }
     var groupWorkouts by remember { mutableStateOf<List<GroupWorkout>>(emptyList()) }
     
@@ -188,7 +256,7 @@ fun SubscriptionsScreen(
             }
             
             // Загружаем абонементы
-            availableSubscriptions = repository.getAvailableSubscriptions()
+            availableSubscriptions = repository.getAvailableSubscriptions().sortedBy { it.durationDays }
             userSubscriptions = repository.getUserSubscriptions()
             // Предзагружаем тренеров и тренировки, чтобы разделы Тренировки и Чаты
             // были готовы до перехода в них
@@ -221,7 +289,25 @@ fun SubscriptionsScreen(
     
     LaunchedEffect(Unit) {
         repository.observeAvailableSubscriptions().collect { subs ->
-            availableSubscriptions = subs
+            availableSubscriptions = subs.sortedBy { it.durationDays }
+        }
+    }
+
+    LaunchedEffect(currentUser?.id, groupWorkouts, chatResetSignal, selectedNavItem) {
+        val userId = currentUser?.id ?: return@LaunchedEffect
+        val allTrainers = repository.getAllTrainers()
+        val trainerIdsFromWorkouts = groupWorkouts
+            .filter { it.isIndividualWorkout && it.clientId == userId && it.trainerId.isNotBlank() }
+            .map { it.trainerId }
+            .distinct()
+        val chatTrainerUserIds = allTrainers
+            .filter { (it.id in trainerIdsFromWorkouts || it.userId in trainerIdsFromWorkouts) && it.userId.isNotBlank() }
+            .map { it.userId }
+            .distinct()
+
+        unreadChatDialogs = chatTrainerUserIds.count { trainerUserId ->
+            val chatId = getClientChatId(userId, trainerUserId)
+            repository.getUnreadMessageCount(chatId, userId) > 0
         }
     }
     
@@ -238,7 +324,10 @@ fun SubscriptionsScreen(
         }
     }
     
-    val activeSubscriptions = userSubscriptions.filter { !it.isExpired && it.active }
+    val activeSubscriptions = userSubscriptions
+        .filter { !it.isExpired && it.active }
+        .sortedBy { it.durationDaysValue }
+    val sortedAvailableSubscriptions = availableSubscriptions.sortedBy { it.durationDays }
     val hasActiveSubscriptions = activeSubscriptions.isNotEmpty()
     
     // Имя пользователя для отображения
@@ -252,7 +341,7 @@ fun SubscriptionsScreen(
         currentProfileSection != null -> currentProfileSection!!.getTitle(lang)
         selectedNavItem == ClientNavItem.PROFILE -> Strings.profile(lang)
         selectedNavItem == ClientNavItem.CALCULATOR -> Strings.calculator(lang)
-        selectedNavItem == ClientNavItem.WORKOUTS -> Strings.workouts(lang)
+        selectedNavItem == ClientNavItem.WORKOUTS -> if (lang == AppLanguage.RUSSIAN) "Занятия" else Strings.workouts(lang)
         else -> Strings.appName(lang)
     }
     
@@ -303,10 +392,7 @@ fun SubscriptionsScreen(
                 actions = {
                     if (selectedNavItem == ClientNavItem.PROFILE) {
                         IconButton(
-                            onClick = {
-                                repository.logout()
-                                onLogout()
-                            }
+                            onClick = { showLogoutConfirm = true }
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ExitToApp,
@@ -326,15 +412,31 @@ fun SubscriptionsScreen(
                 ClientNavItem.entries.forEach { item ->
                     NavigationBarItem(
                         icon = {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.getLabel(lang)
-                            )
+                            if (item == ClientNavItem.CHATS && unreadChatDialogs > 0) {
+                                BadgedBox(
+                                    badge = {
+                                        Badge {
+                                            Text(unreadChatDialogs.toString())
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = item.icon,
+                                        contentDescription = item.getLabel(lang)
+                                    )
+                                }
+                            } else {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = item.getLabel(lang)
+                                )
+                            }
                         },
                         label = { 
                             Text(
                                 text = item.getLabel(lang),
-                                style = MaterialTheme.typography.labelSmall
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1
                             )
                         },
                         selected = selectedNavItem == item,
@@ -420,7 +522,8 @@ fun SubscriptionsScreen(
                             currentUser = currentUser,
                             groupWorkouts = groupWorkouts,
                             lang = lang,
-                            resetSignal = chatResetSignal
+                            resetSignal = chatResetSignal,
+                            onUnreadDialogsChanged = { unreadChatDialogs = it }
                         )
                     }
                     ClientNavItem.WORKOUTS -> {
@@ -438,6 +541,7 @@ fun SubscriptionsScreen(
                                     IndividualBookingScreen(
                                         currentUser = currentUser,
                                         lang = lang,
+                                        hasActiveSubscription = hasActiveSubscriptions,
                                         onWorkoutBooked = {
                                             scope.launch {
                                                 groupWorkouts = repository.getAllGroupWorkouts()
@@ -506,8 +610,16 @@ fun SubscriptionsScreen(
                                         workouts = onlyGroupWorkouts,
                                         currentUserId = currentUser?.id ?: "",
                                         lang = lang,
+                                        hasActiveSubscription = hasActiveSubscriptions,
                                         onSignUp = { workout ->
                                             scope.launch {
+                                                if (!hasActiveSubscriptions) {
+                                                    errorMessage = if (lang == AppLanguage.RUSSIAN)
+                                                        "Для записи на тренировку нужен активный абонемент"
+                                                    else
+                                                        "An active subscription is required to sign up for a workout"
+                                                    return@launch
+                                                }
                                                 val result = repository.signUpForWorkout(workout.id, currentUser?.id ?: "")
                                                 result.fold(
                                                     onSuccess = {
@@ -580,9 +692,9 @@ fun SubscriptionsScreen(
                             ProfileSection.SUBSCRIPTIONS -> {
                                 SubscriptionsFullScreen(
                                     userSubscriptions = userSubscriptions,
-                                    availableSubscriptions = availableSubscriptions,
+                                    availableSubscriptions = sortedAvailableSubscriptions,
+                                    scrollToTopSignal = subscriptionsScrollToTopSignal,
                                     onPurchase = { subscription ->
-                                        currentProfileSection = null
                                         showPurchaseDialog = subscription
                                     }
                                 )
@@ -599,6 +711,17 @@ fun SubscriptionsScreen(
             }
             
         }
+    }
+
+    if (showLogoutConfirm) {
+        LogoutConfirmDialog(
+            onDismiss = { showLogoutConfirm = false },
+            onConfirm = {
+                showLogoutConfirm = false
+                repository.logout()
+                onLogout()
+            }
+        )
     }
 
     successDialogMessage?.let { message ->
@@ -656,7 +779,7 @@ fun SubscriptionsScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Срок действия: ${subscription.durationDays} дней",
+                        text = "Срок действия: ${formatSubscriptionDurationShort(subscription.durationDays)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -675,7 +798,10 @@ fun SubscriptionsScreen(
                                     showPurchaseDialog = null
                                     // Обновляем список абонементов
                                     userSubscriptions = repository.getUserSubscriptions()
-                                    availableSubscriptions = repository.getAvailableSubscriptions()
+                                    availableSubscriptions = repository.getAvailableSubscriptions().sortedBy { it.durationDays }
+                                    selectedNavItem = ClientNavItem.PROFILE
+                                    currentProfileSection = ProfileSection.SUBSCRIPTIONS
+                                    subscriptionsScrollToTopSignal++
                                     successDialogMessage = if (lang == AppLanguage.RUSSIAN)
                                         "Абонемент успешно оформлен"
                                     else
@@ -998,7 +1124,7 @@ private fun AvailableSubscriptionCard(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${subscription.durationDays} дней",
+                                text = formatSubscriptionDurationShort(subscription.durationDays),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1090,6 +1216,17 @@ private fun getDaysText(days: Int): String {
         else -> "дней"
     }
 }
+
+private fun formatSubscriptionDurationShort(days: Int): String {
+    return if (days >= 30 && days % 30 == 0) {
+        "${days / 30} мес."
+    } else {
+        "$days дн."
+    }
+}
+
+private val UserSubscription.durationDaysValue: Long
+    get() = ChronoUnit.DAYS.between(startLocalDate, endLocalDate).coerceAtLeast(0)
 
 @Composable
 private fun HomeContent(
@@ -1530,20 +1667,12 @@ private fun HomeWelcomeContent(
                                 modifier = Modifier.padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(CircleShape)
-                                        .background(SportOrange),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 26.sp
-                                    )
-                                }
+                                AvatarImage(
+                                    photoUrl = trainer.photoUrl,
+                                    fallbackText = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                    modifier = Modifier.size(64.dp),
+                                    fontSize = 26
+                                )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
                                     text = trainer.fullName,
@@ -1627,15 +1756,20 @@ internal fun NutritionScreen(
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
 
-    val allProducts = remember { loadFoodProducts(context) }
-    val categories = remember(allProducts) { allProducts.map { it.category }.distinct().sorted() }
+    val builtInProducts = remember { loadFoodProducts(context) }
+    var customProducts by remember { mutableStateOf<List<FoodProduct>>(emptyList()) }
+    val selectableProducts = remember(builtInProducts, customProducts) {
+        builtInProducts + customProducts
+    }
+    val categories = remember(builtInProducts) { builtInProducts.map { it.category }.distinct() }
 
     var selectedDate by remember { mutableStateOf(java.time.LocalDate.now()) }
     val dateStr = remember(selectedDate) { selectedDate.format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE) }
 
     var foodEntries by remember { mutableStateOf<List<FoodEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var showAddDialog by remember { mutableStateOf(false) }
+    var mealForAddDialog by remember { mutableStateOf<MealType?>(null) }
+    var showCreateProductDialog by remember { mutableStateOf(false) }
     var entryToDelete by remember { mutableStateOf<FoodEntry?>(null) }
 
     val dailyNorm = remember(currentUser) {
@@ -1657,6 +1791,12 @@ internal fun NutritionScreen(
         repository.observeFoodEntries(dateStr).collect { entries ->
             foodEntries = entries
             isLoading = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        repository.observeCustomFoodProducts().collect { products ->
+            customProducts = products
         }
     }
 
@@ -1810,63 +1950,53 @@ internal fun NutritionScreen(
                         CircularProgressIndicator(color = SportOrange)
                     }
                 }
-            } else if (foodEntries.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = "🍽️", fontSize = 48.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = if (lang == AppLanguage.RUSSIAN) "Нет записей за этот день" else "No entries for this day",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (lang == AppLanguage.RUSSIAN)
-                                    "Нажмите «+» чтобы добавить продукт"
-                                else "Tap «+» to add a product",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
+            } else {
+                MealType.entries.forEach { mealType ->
+                    item {
+                        MealSection(
+                            mealType = mealType,
+                            entries = foodEntries.filter { MealType.fromKey(it.mealType) == mealType },
+                            lang = lang,
+                            onAddClick = { mealForAddDialog = mealType },
+                            onDelete = { entryToDelete = it }
+                        )
                     }
                 }
-            } else {
-                items(foodEntries.size) { index ->
-                    val entry = foodEntries[index]
-                    FoodEntryCard(
-                        entry = entry,
-                        lang = lang,
-                        onDelete = { entryToDelete = entry }
-                    )
+                if (foodEntries.isEmpty()) {
+                    item {
+                        Text(
+                            text = if (lang == AppLanguage.RUSSIAN)
+                                "Добавьте блюдо в один из приёмов пищи"
+                            else
+                                "Add a dish to one of the meals",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }
 
-        // FAB
-        FloatingActionButton(
-            onClick = { showAddDialog = true },
+        ExtendedFloatingActionButton(
+            onClick = { showCreateProductDialog = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
             containerColor = SportOrange,
-            contentColor = Color.White
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Добавить")
-        }
+            contentColor = Color.White,
+            icon = { Icon(Icons.Default.Add, contentDescription = null) },
+            text = { Text(if (lang == AppLanguage.RUSSIAN) "Добавить блюдо" else "Add dish") }
+        )
     }
 
-    // Диалог добавления продукта
-    if (showAddDialog) {
+    mealForAddDialog?.let { mealType ->
         AddFoodDialog(
-            allProducts = allProducts,
+            allProducts = selectableProducts,
             categories = categories,
             lang = lang,
-            onDismiss = { showAddDialog = false },
+            onDismiss = { mealForAddDialog = null },
             onAdd = { product, weightGrams ->
                 val factor = weightGrams / 100f
                 val entry = FoodEntry(
@@ -1876,12 +2006,27 @@ internal fun NutritionScreen(
                     proteins = product.proteins * factor,
                     fats = product.fats * factor,
                     carbs = product.carbs * factor,
-                    date = dateStr
+                    date = dateStr,
+                    mealType = mealType.key
                 )
                 scope.launch {
                     repository.addFoodEntry(entry)
                 }
-                showAddDialog = false
+                mealForAddDialog = null
+            }
+        )
+    }
+
+    if (showCreateProductDialog) {
+        CreateCustomFoodDialog(
+            categories = categories,
+            lang = lang,
+            onDismiss = { showCreateProductDialog = false },
+            onAdd = { product ->
+                scope.launch {
+                    repository.addCustomFoodProduct(product)
+                }
+                showCreateProductDialog = false
             }
         )
     }
@@ -1968,6 +2113,204 @@ private fun NutrientProgressCard(
 }
 
 @Composable
+private fun MealSection(
+    mealType: MealType,
+    entries: List<FoodEntry>,
+    lang: AppLanguage,
+    onAddClick: () -> Unit,
+    onDelete: (FoodEntry) -> Unit
+) {
+    val calories = entries.sumOf { it.calories.toDouble() }.toFloat()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) mealType.ruTitle else mealType.enTitle,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "%.0f ккал".format(calories),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = SportOrange
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (entries.isEmpty()) {
+                Text(
+                    text = if (lang == AppLanguage.RUSSIAN) "Блюд пока нет" else "No dishes yet",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    entries.forEach { entry ->
+                        FoodEntryCard(entry = entry, lang = lang, onDelete = { onDelete(entry) })
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onAddClick,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(if (lang == AppLanguage.RUSSIAN) "Добавить блюдо" else "Add dish")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreateCustomFoodDialog(
+    categories: List<String>,
+    lang: AppLanguage,
+    onDismiss: () -> Unit,
+    onAdd: (FoodProduct) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var proteins by remember { mutableStateOf("") }
+    var fats by remember { mutableStateOf("") }
+    var carbs by remember { mutableStateOf("") }
+    var selectedCategory by remember(categories) { mutableStateOf(categories.firstOrNull().orEmpty()) }
+
+    fun String.toFloatInput(): Float = replace(',', '.').toFloatOrNull() ?: 0f
+    val calculatedCalories = proteins.toFloatInput() * 4f + fats.toFloatInput() * 9f + carbs.toFloatInput() * 4f
+
+    val product = FoodProduct(
+        name = name.trim(),
+        calories = calculatedCalories,
+        proteins = proteins.toFloatInput(),
+        fats = fats.toFloatInput(),
+        carbs = carbs.toFloatInput(),
+        category = selectedCategory
+    )
+    val canAdd = product.name.isNotBlank() && selectedCategory.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxWidth().fillMaxHeight(0.75f),
+        title = { Text(if (lang == AppLanguage.RUSSIAN) "Добавить блюдо" else "Add dish") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (lang == AppLanguage.RUSSIAN) "Название продукта" else "Product name") },
+                        singleLine = true
+                    )
+                }
+                item {
+                    ExposedDropdownMenuBox(
+                        expanded = false,
+                        onExpandedChange = {}
+                    ) {
+                        var expanded by remember { mutableStateOf(false) }
+                        Box {
+                            OutlinedTextField(
+                                value = selectedCategory,
+                                onValueChange = {},
+                                readOnly = true,
+                                modifier = Modifier.fillMaxWidth().menuAnchor(),
+                                label = { Text(if (lang == AppLanguage.RUSSIAN) "Категория" else "Category") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+                            )
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.fillMaxWidth(0.85f)
+                            ) {
+                                categories.forEach { category ->
+                                    DropdownMenuItem(
+                                        text = { Text(category) },
+                                        onClick = {
+                                            selectedCategory = category
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                            Spacer(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { expanded = true }
+                            )
+                        }
+                    }
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NutritionNumberField("Белки", proteins, { proteins = it }, Modifier.weight(1f))
+                        NutritionNumberField("Жиры", fats, { fats = it }, Modifier.weight(1f))
+                    }
+                }
+                item {
+                    NutritionNumberField("Углеводы", carbs, { carbs = it }, Modifier.fillMaxWidth())
+                }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Text(
+                            text = "Ккал: %.0f".format(calculatedCalories),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = SportOrange,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onAdd(product) }, enabled = canAdd) {
+                Text(if (lang == AppLanguage.RUSSIAN) "Добавить" else "Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(if (lang == AppLanguage.RUSSIAN) "Отмена" else "Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun NutritionNumberField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { newValue ->
+            if (newValue.isEmpty() || newValue.all { it.isDigit() || it == '.' || it == ',' }) {
+                onValueChange(newValue)
+            }
+        },
+        modifier = modifier,
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        shape = RoundedCornerShape(12.dp)
+    )
+}
+
+@Composable
 private fun FoodEntryCard(
     entry: FoodEntry,
     lang: AppLanguage,
@@ -2001,6 +2344,9 @@ private fun FoodEntryCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF4CAF50)
                     )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "Ж: %.1f".format(entry.fats),
                         style = MaterialTheme.typography.labelSmall,
@@ -2126,6 +2472,8 @@ private fun AddFoodDialog(
                                             style = MaterialTheme.typography.labelSmall,
                                             color = Color(0xFF4CAF50)
                                         )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                         Text(
                                             text = "Ж: %.1f".format(product.fats),
                                             style = MaterialTheme.typography.labelSmall,
@@ -2182,6 +2530,8 @@ private fun AddFoodDialog(
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text("%.0f ккал".format(product.calories), style = MaterialTheme.typography.bodySmall, color = SportOrange)
                                 Text("Б: %.1f".format(product.proteins), style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text("Ж: %.1f".format(product.fats), style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFA726))
                                 Text("У: %.1f".format(product.carbs), style = MaterialTheme.typography.bodySmall, color = Color(0xFF42A5F5))
                             }
@@ -2222,6 +2572,8 @@ private fun AddFoodDialog(
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Text("%.0f ккал".format(product.calories * factor), style = MaterialTheme.typography.bodySmall, color = SportOrange)
                                     Text("Б: %.1f г".format(product.proteins * factor), style = MaterialTheme.typography.bodySmall, color = Color(0xFF4CAF50))
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Text("Ж: %.1f г".format(product.fats * factor), style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFA726))
                                     Text("У: %.1f г".format(product.carbs * factor), style = MaterialTheme.typography.bodySmall, color = Color(0xFF42A5F5))
                                 }
@@ -2820,35 +3172,34 @@ private fun ProfileInfoCard(label: String, value: String, icon: String) {
 }
 
 
-private enum class SubscriptionSort(val label: String) {
-    PRICE_ASC("Цена ↑"),
-    PRICE_DESC("Цена ↓"),
-    DURATION_ASC("Срок ↑"),
-    DURATION_DESC("Срок ↓")
-}
-
 @Composable
 private fun SubscriptionsFullScreen(
     userSubscriptions: List<UserSubscription>,
     availableSubscriptions: List<Subscription>,
+    scrollToTopSignal: Int,
     onPurchase: (Subscription) -> Unit
 ) {
-    val activeUserSubscriptions = userSubscriptions.filter { !it.isExpired && it.active }
+    val activeUserSubscriptions = remember(userSubscriptions) {
+        userSubscriptions
+            .filter { !it.isExpired && it.active }
+            .sortedBy { it.durationDaysValue }
+    }
     val hasActiveSubscriptions = activeUserSubscriptions.isNotEmpty()
 
-    var selectedSort by remember { mutableStateOf(SubscriptionSort.PRICE_ASC) }
+    val sortedSubscriptions = remember(availableSubscriptions) {
+        availableSubscriptions.sortedBy { it.durationDays }
+    }
+    val listState = rememberLazyListState()
 
-    val sortedSubscriptions = remember(availableSubscriptions, selectedSort) {
-        when (selectedSort) {
-            SubscriptionSort.PRICE_ASC     -> availableSubscriptions.sortedBy { it.price }
-            SubscriptionSort.PRICE_DESC    -> availableSubscriptions.sortedByDescending { it.price }
-            SubscriptionSort.DURATION_ASC  -> availableSubscriptions.sortedBy { it.durationDays }
-            SubscriptionSort.DURATION_DESC -> availableSubscriptions.sortedByDescending { it.durationDays }
+    LaunchedEffect(scrollToTopSignal) {
+        if (scrollToTopSignal > 0) {
+            listState.animateScrollToItem(0)
         }
     }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -2881,35 +3232,6 @@ private fun SubscriptionsFullScreen(
                     title = "Доступные абонементы",
                     subtitle = "Выберите подходящий тариф"
                 )
-            }
-        }
-
-        // Строка сортировки
-        item {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(horizontal = 0.dp)
-            ) {
-                items(SubscriptionSort.entries) { sort ->
-                    val isSelected = sort == selectedSort
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedSort = sort },
-                        label = { Text(sort.label, fontSize = 13.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = isSelected,
-                            selectedBorderColor = MaterialTheme.colorScheme.primary,
-                            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-                        )
-                    )
-                }
             }
         }
 
@@ -2961,29 +3283,13 @@ private fun TrainersScreen(trainers: List<Trainer>) {
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.tertiary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (trainer.photoUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = trainer.photoUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
-                            } else {
-                                Text(
-                                    text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 28.sp
-                                )
-                            }
-                        }
+                        AvatarImage(
+                            photoUrl = trainer.photoUrl,
+                            fallbackText = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                            modifier = Modifier.size(64.dp),
+                            backgroundColor = MaterialTheme.colorScheme.tertiary,
+                            fontSize = 28
+                        )
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -3251,6 +3557,7 @@ private fun WorkoutTypeToggle(
 private fun IndividualBookingScreen(
     currentUser: User?,
     lang: AppLanguage,
+    hasActiveSubscription: Boolean,
     onWorkoutBooked: () -> Unit
 ) {
     val repository = remember { FirebaseRepo.instance }
@@ -3664,6 +3971,13 @@ private fun IndividualBookingScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             Button(
                                 onClick = {
+                                    if (!hasActiveSubscription) {
+                                        errorMessage = if (lang == AppLanguage.RUSSIAN)
+                                            "Для записи на тренировку нужен активный абонемент"
+                                        else
+                                            "An active subscription is required to book a workout"
+                                        return@Button
+                                    }
                                     val slot = selectedSlotForHour ?: return@Button
                                     val user = currentUser ?: return@Button
                                     val hour = selectedHour
@@ -3685,7 +3999,7 @@ private fun IndividualBookingScreen(
                                         }
                                     }
                                 },
-                                enabled = selectedHour >= 0 && !isBooking,
+                                enabled = selectedHour >= 0 && !isBooking && hasActiveSubscription,
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
@@ -3703,6 +4017,19 @@ private fun IndividualBookingScreen(
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                     )
                                 }
+                            }
+                            if (!hasActiveSubscription) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (lang == AppLanguage.RUSSIAN)
+                                        "Оформите абонемент, чтобы записываться на тренировки"
+                                    else
+                                        "Purchase a subscription to book workouts",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }
@@ -3783,21 +4110,12 @@ private fun IndividualWorkoutsScreen(trainers: List<Trainer>) {
                             .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Фото/аватар тренера
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(CircleShape)
-                                .background(SportOrange),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp
-                            )
-                        }
+                        AvatarImage(
+                            photoUrl = trainer.photoUrl,
+                            fallbackText = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                            modifier = Modifier.size(72.dp),
+                            fontSize = 28
+                        )
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -4092,6 +4410,7 @@ private fun GroupWorkoutsScreen(
     workouts: List<GroupWorkout>,
     currentUserId: String,
     lang: AppLanguage,
+    hasActiveSubscription: Boolean,
     onSignUp: (GroupWorkout) -> Unit,
     onCancelSignUp: (GroupWorkout) -> Unit
 ) {
@@ -4235,6 +4554,7 @@ private fun GroupWorkoutsScreen(
             workout = workout,
             currentUserId = currentUserId,
             lang = lang,
+            hasActiveSubscription = hasActiveSubscription,
             onDismiss = { selectedWorkout = null },
             onSignUp = {
                 onSignUp(workout)
@@ -4253,6 +4573,7 @@ private fun WorkoutDetailsDialog(
     workout: GroupWorkout,
     currentUserId: String,
     lang: AppLanguage,
+    hasActiveSubscription: Boolean,
     onDismiss: () -> Unit,
     onSignUp: () -> Unit,
     onCancelSignUp: () -> Unit
@@ -4463,9 +4784,20 @@ private fun WorkoutDetailsDialog(
             } else if (!workout.isFull) {
                 Button(
                     onClick = onSignUp,
+                    enabled = hasActiveSubscription,
                     colors = ButtonDefaults.buttonColors(containerColor = SportOrange)
                 ) {
                     Text(if (lang == AppLanguage.RUSSIAN) "Записаться" else "Sign up")
+                }
+                if (!hasActiveSubscription) {
+                    Text(
+                        text = if (lang == AppLanguage.RUSSIAN)
+                            "Нужен активный абонемент"
+                        else
+                            "Active subscription required",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         },
@@ -4493,7 +4825,8 @@ private fun ClientChatsScreen(
     currentUser: User?,
     groupWorkouts: List<GroupWorkout>,
     lang: AppLanguage,
-    resetSignal: Int
+    resetSignal: Int,
+    onUnreadDialogsChanged: (Int) -> Unit
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
@@ -4501,8 +4834,18 @@ private fun ClientChatsScreen(
     var selectedChatTrainer by remember { mutableStateOf<Trainer?>(null) }
     var chatTrainers by remember { mutableStateOf<List<Trainer>>(emptyList()) }
 
+    suspend fun refreshUnreadDialogs() {
+        val userId = currentUser?.id ?: return
+        val unreadDialogs = chatTrainers.count { trainer ->
+            val chatId = getClientChatId(userId, trainer.userId)
+            repository.getUnreadMessageCount(chatId, userId) > 0
+        }
+        onUnreadDialogsChanged(unreadDialogs)
+    }
+
     LaunchedEffect(resetSignal) {
         selectedChatTrainer = null
+        refreshUnreadDialogs()
     }
     
     // Загружаем тренеров из индивидуальных тренировок клиента
@@ -4518,6 +4861,7 @@ private fun ClientChatsScreen(
         chatTrainers = allTrainers
             .filter { (it.id in trainerIdsFromWorkouts || it.userId in trainerIdsFromWorkouts) && it.userId.isNotBlank() }
             .distinctBy { it.userId }
+        refreshUnreadDialogs()
     }
     
     if (selectedChatTrainer != null) {
@@ -4526,7 +4870,9 @@ private fun ClientChatsScreen(
             currentUser = currentUser,
             otherUserId = trainer.userId,
             otherName = trainer.fullName,
+            otherPhotoUrl = trainer.photoUrl,
             lang = lang,
+            onUnreadStateChanged = { scope.launch { refreshUnreadDialogs() } },
             onBack = { selectedChatTrainer = null }
         )
     } else {
@@ -4584,20 +4930,12 @@ private fun ClientChatsScreen(
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(SportOrange),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 20.sp
-                                )
-                            }
+                            AvatarImage(
+                                photoUrl = trainer.photoUrl,
+                                fallbackText = trainer.firstName.firstOrNull()?.uppercase() ?: "?",
+                                modifier = Modifier.size(56.dp),
+                                fontSize = 20
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -4642,18 +4980,23 @@ private fun ClientChatDetailScreen(
     currentUser: User?,
     otherUserId: String,
     otherName: String,
+    otherPhotoUrl: String,
     lang: AppLanguage,
+    onUnreadStateChanged: () -> Unit,
     onBack: () -> Unit
 ) {
     val repository = remember { FirebaseRepo.instance }
     val scope = rememberCoroutineScope()
     
     val chatId = remember(currentUser?.id, otherUserId) { getClientChatId(currentUser?.id ?: "", otherUserId) }
-    var messageText by remember { mutableStateOf("") }
+    var messageText by remember { mutableStateOf(TextFieldValue("")) }
     val messages by repository.observeChatMessages(chatId).collectAsState(initial = emptyList())
     val listState = rememberLazyListState()
     var isUploadingImage by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    var selectedMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var editingMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var pendingDeleteMessage by remember { mutableStateOf<ChatMessage?>(null) }
 
     val chatContext = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -4679,6 +5022,7 @@ private fun ClientChatDetailScreen(
     LaunchedEffect(chatId, incomingUnread) {
         if (incomingUnread > 0) {
             repository.markMessagesAsRead(chatId, currentUser?.id ?: "")
+            onUnreadStateChanged()
         }
     }
 
@@ -4705,6 +5049,38 @@ private fun ClientChatDetailScreen(
             }
         }
     }
+
+    selectedMessage?.let { message ->
+        ChatMessageActionsDialog(
+            message = message,
+            currentUserId = currentUser?.id ?: "",
+            onDismiss = { selectedMessage = null },
+            onEdit = {
+                selectedMessage = null
+                editingMessage = message
+                messageText = TextFieldValue(
+                    text = message.text,
+                    selection = TextRange(message.text.length)
+                )
+            },
+            onDelete = {
+                selectedMessage = null
+                pendingDeleteMessage = message
+            }
+        )
+    }
+
+    pendingDeleteMessage?.let { message ->
+        ConfirmDeleteChatMessageDialog(
+            onDismiss = { pendingDeleteMessage = null },
+            onConfirm = {
+                pendingDeleteMessage = null
+                scope.launch {
+                    repository.deleteChatMessage(message.id, currentUser?.id ?: "")
+                }
+            }
+        )
+    }
     
     Column(modifier = Modifier.fillMaxSize()) {
         // Шапка чата
@@ -4726,19 +5102,12 @@ private fun ClientChatDetailScreen(
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(SportOrange),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = otherName.firstOrNull()?.uppercase() ?: "?",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                AvatarImage(
+                    photoUrl = otherPhotoUrl,
+                    fallbackText = otherName.firstOrNull()?.uppercase() ?: "?",
+                    modifier = Modifier.size(40.dp),
+                    fontSize = 16
+                )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
@@ -4770,7 +5139,8 @@ private fun ClientChatDetailScreen(
                     ChatMessageBubble(
                         message = message,
                         isMyMessage = isMyMessage,
-                        onImageClick = { previewImageUrl = it }
+                        onImageClick = { previewImageUrl = it },
+                        onMessageClick = { selectedMessage = message }
                     )
                 }
             }
@@ -4800,58 +5170,94 @@ private fun ClientChatDetailScreen(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 3.dp
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(12.dp)
             ) {
-                IconButton(
-                    onClick = { imagePicker.launch("image/*") },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    if (isUploadingImage) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = SportOrange)
-                    } else {
-                        Text("📎", fontSize = 20.sp)
+                if (editingMessage != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (lang == AppLanguage.RUSSIAN) "Редактирование сообщения" else "Editing message",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                editingMessage = null
+                                messageText = TextFieldValue("")
+                            }
+                        ) {
+                            Text(if (lang == AppLanguage.RUSSIAN) "Отмена" else "Cancel")
+                        }
                     }
                 }
-                OutlinedTextField(
-                    value = messageText,
-                    onValueChange = { messageText = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { 
-                        Text(if (lang == AppLanguage.RUSSIAN) "Сообщение..." else "Message...") 
-                    },
-                    shape = RoundedCornerShape(24.dp),
-                    maxLines = 4
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        if (messageText.isNotBlank()) {
-                            val text = messageText.trim()
-                            messageText = ""
-                            scope.launch {
-                                repository.sendMessage(
-                                    chatId = chatId,
-                                    senderId = currentUser?.id ?: "",
-                                    senderName = currentUser?.fullName ?: "",
-                                    text = text
-                                )
-                            }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { imagePicker.launch("image/*") },
+                        modifier = Modifier.size(40.dp),
+                        enabled = editingMessage == null
+                    ) {
+                        if (isUploadingImage) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = SportOrange)
+                        } else {
+                            Text("📎", fontSize = 20.sp)
                         }
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(SportOrange)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = if (lang == AppLanguage.RUSSIAN) "Отправить" else "Send",
-                        tint = Color.White
+                    }
+                    OutlinedTextField(
+                        value = messageText,
+                        onValueChange = { messageText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { 
+                            Text(if (lang == AppLanguage.RUSSIAN) "Сообщение..." else "Message...") 
+                        },
+                        shape = RoundedCornerShape(24.dp),
+                        maxLines = 4
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            if (messageText.text.isNotBlank()) {
+                                val text = messageText.text.trim()
+                                val messageToEdit = editingMessage
+                                messageText = TextFieldValue("")
+                                editingMessage = null
+                                scope.launch {
+                                    if (messageToEdit != null) {
+                                        repository.updateChatMessageText(
+                                            messageId = messageToEdit.id,
+                                            senderId = currentUser?.id ?: "",
+                                            newText = text
+                                        )
+                                    } else {
+                                        repository.sendMessage(
+                                            chatId = chatId,
+                                            senderId = currentUser?.id ?: "",
+                                            senderName = currentUser?.fullName ?: "",
+                                            text = text
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(SportOrange)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = if (lang == AppLanguage.RUSSIAN) "Отправить" else "Send",
+                            tint = Color.White
+                        )
+                    }
                 }
             }
         }
@@ -4862,7 +5268,8 @@ private fun ClientChatDetailScreen(
 internal fun ChatMessageBubble(
     message: ChatMessage,
     isMyMessage: Boolean,
-    onImageClick: (String) -> Unit
+    onImageClick: (String) -> Unit,
+    onMessageClick: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -4876,7 +5283,9 @@ internal fun ChatMessageBubble(
                 bottomEnd = if (isMyMessage) 4.dp else 16.dp
             ),
             color = if (isMyMessage) SportOrange else MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier
+                .widthIn(max = 280.dp)
+                .clickable { onMessageClick() }
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (message.imageUrl.isNotBlank()) {
@@ -4923,4 +5332,98 @@ internal fun ChatMessageBubble(
             }
         }
     }
+}
+
+@Composable
+internal fun ChatMessageActionsDialog(
+    message: ChatMessage,
+    currentUserId: String,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val clipboardManager = LocalClipboardManager.current
+    val isMyMessage = message.senderId == currentUserId
+    val canCopy = message.text.isNotBlank()
+    val canEdit = isMyMessage && canCopy &&
+        System.currentTimeMillis() - message.timestamp.toDate().time <= CHAT_MESSAGE_EDIT_WINDOW_MS
+    val hasActions = canCopy || canEdit || isMyMessage
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.widthIn(min = 240.dp, max = 320.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "Действия с сообщением",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+
+                if (canCopy) {
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(message.text))
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Копировать текст", modifier = Modifier.fillMaxWidth())
+                    }
+                }
+
+                if (canEdit) {
+                    TextButton(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+                        Text("Редактировать", modifier = Modifier.fillMaxWidth())
+                    }
+                }
+
+                if (isMyMessage) {
+                    TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Удалить",
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                if (!hasActions) {
+                    Text(
+                        text = "Нет доступных действий",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ConfirmDeleteChatMessageDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Удалить сообщение?") },
+        text = { Text("Это действие нельзя отменить.") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Удалить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
 }

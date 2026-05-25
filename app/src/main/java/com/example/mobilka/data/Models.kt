@@ -539,9 +539,20 @@ data class FoodEntry(
     val fats: Float = 0f,
     val carbs: Float = 0f,
     val date: String = "",
+    val mealType: String = MealType.BREAKFAST.key,
     val createdAt: Timestamp = Timestamp.now()
 ) {
-    constructor() : this("", "", "", 0f, 0f, 0f, 0f, 0f, "", Timestamp.now())
+    constructor() : this("", "", "", 0f, 0f, 0f, 0f, 0f, "", MealType.BREAKFAST.key, Timestamp.now())
+}
+
+enum class MealType(val key: String, val ruTitle: String, val enTitle: String) {
+    BREAKFAST("breakfast", "Завтрак", "Breakfast"),
+    LUNCH("lunch", "Обед", "Lunch"),
+    DINNER("dinner", "Ужин", "Dinner");
+
+    companion object {
+        fun fromKey(key: String): MealType = entries.find { it.key == key } ?: BREAKFAST
+    }
 }
 
 // Дневная норма КБЖУ

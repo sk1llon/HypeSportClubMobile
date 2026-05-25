@@ -55,8 +55,9 @@ service cloud.firestore {
 
     // ==================== ПОЛЬЗОВАТЕЛИ (users) ====================
     match /users/{userId} {
-      // Чтение: свой профиль, или персонал (для списков)
-      allow read:   if isOwner(userId) || isAdmin() || isTrainer() || isManager();
+      // Чтение: свой профиль, персонал, или публичная карточка тренера для аватаров/ФИО
+      allow read:   if isOwner(userId) || isAdmin() || isTrainer() || isManager() ||
+        (isAuthenticated() && resource.data.role == 'TRAINER');
       // Создание: при регистрации (uid совпадает) или персонал управления
       allow create: if isOwner(userId) || isAdmin() || isManager();
       // Обновление: свой профиль или персонал управления
@@ -191,9 +192,19 @@ service cloud.firestore {
         request.resource.data.senderId == request.auth.uid &&
         request.resource.data.chatId.matches('.*' + request.auth.uid + '.*');
 
-      // Обновление: только пометка прочитанным (поле isRead)
+      // Обновление: пометка прочитанным или редактирование автором в первые 12 часов
       allow update: if isAuthenticated() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) ||
+          (
+            resource.data.senderId == request.auth.uid &&
+            request.resource.data.senderId == resource.data.senderId &&
+            request.resource.data.chatId == resource.data.chatId &&
+            request.resource.data.timestamp == resource.data.timestamp &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt']) &&
+            request.time <= resource.data.timestamp + duration.value(12, 'h')
+          )
+        );
 
       // Удаление: автор или администратор
       allow delete: if isAuthenticated() &&
@@ -213,6 +224,18 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid;
 
       allow delete: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // ==================== ПОЛЬЗОВАТЕЛЬСКИЕ ПРОДУКТЫ БЖУ ====================
+    match /custom_food_products/{productId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+
+      allow update, delete: if isAuthenticated() &&
         (resource.data.userId == request.auth.uid || isAdmin());
     }
 

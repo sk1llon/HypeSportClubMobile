@@ -36,6 +36,7 @@ class FirebaseRepository {
     private val groupWorkoutsCollection = firestore.collection("group_workouts")
     private val trainerAvailabilityCollection = firestore.collection("trainer_availability")
     private val foodEntriesCollection = firestore.collection("food_entries")
+    private val customFoodProductsCollection = firestore.collection("custom_food_products")
     
     // Текущий пользователь Firebase
     val currentFirebaseUser: FirebaseUser?
@@ -276,7 +277,21 @@ class FirebaseRepository {
         return try {
             val snapshot = trainersCollection.get().await()
             snapshot.documents.mapNotNull { doc ->
-                doc.toObject(Trainer::class.java)?.copy(id = doc.id)
+                val trainer = doc.toObject(Trainer::class.java)?.copy(id = doc.id) ?: return@mapNotNull null
+                if (trainer.photoUrl.isNotBlank() || trainer.userId.isBlank()) {
+                    trainer
+                } else {
+                    val userPhotoUrl = try {
+                        usersCollection.document(trainer.userId)
+                            .get()
+                            .await()
+                            .getString("photoUrl")
+                            .orEmpty()
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    trainer.copy(photoUrl = userPhotoUrl)
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -288,7 +303,21 @@ class FirebaseRepository {
         return try {
             val snapshot = trainersCollection.whereEqualTo("userId", userId).get().await()
             snapshot.documents.firstOrNull()?.let { doc ->
-                doc.toObject(Trainer::class.java)?.copy(id = doc.id)
+                val trainer = doc.toObject(Trainer::class.java)?.copy(id = doc.id)
+                if (trainer == null || trainer.photoUrl.isNotBlank()) {
+                    trainer
+                } else {
+                    val userPhotoUrl = try {
+                        usersCollection.document(userId)
+                            .get()
+                            .await()
+                            .getString("photoUrl")
+                            .orEmpty()
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    trainer.copy(photoUrl = userPhotoUrl)
+                }
             }
         } catch (e: Exception) {
             null
@@ -629,6 +658,50 @@ class FirebaseRepository {
             )
             val docRef = chatMessagesCollection.add(data).await()
             Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateChatMessageText(messageId: String, senderId: String, newText: String): Result<Unit> {
+        return try {
+            val trimmedText = newText.trim()
+            if (trimmedText.isBlank()) return Result.failure(IllegalArgumentException("Сообщение не может быть пустым"))
+
+            val docRef = chatMessagesCollection.document(messageId)
+            val snapshot = docRef.get().await()
+            val messageSenderId = snapshot.getString("senderId") ?: ""
+            val timestamp = snapshot.getTimestamp("timestamp")
+            val isEditableByTime = timestamp != null &&
+                System.currentTimeMillis() - timestamp.toDate().time <= CHAT_MESSAGE_EDIT_WINDOW_MS
+
+            if (messageSenderId != senderId || !isEditableByTime) {
+                return Result.failure(IllegalStateException("Редактирование сообщения недоступно"))
+            }
+
+            docRef.update(
+                mapOf(
+                    "text" to trimmedText,
+                    "editedAt" to Timestamp.now()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteChatMessage(messageId: String, senderId: String): Result<Unit> {
+        return try {
+            val docRef = chatMessagesCollection.document(messageId)
+            val snapshot = docRef.get().await()
+            val messageSenderId = snapshot.getString("senderId") ?: ""
+            if (messageSenderId != senderId) {
+                return Result.failure(IllegalStateException("Удаление сообщения недоступно"))
+            }
+
+            docRef.delete().await()
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1371,6 +1444,7 @@ class FirebaseRepository {
                 "fats" to entry.fats,
                 "carbs" to entry.carbs,
                 "date" to entry.date,
+                "mealType" to entry.mealType,
                 "createdAt" to com.google.firebase.Timestamp.now()
             )
             val doc = foodEntriesCollection.add(data).await()
@@ -1423,6 +1497,50 @@ class FirebaseRepository {
         }
     }
 
+    suspend fun addCustomFoodProduct(product: FoodProduct): Result<String> {
+        return try {
+            val userId = auth.currentUser?.uid ?: throw Exception("Пользователь не авторизован")
+            val data = hashMapOf(
+                "userId" to userId,
+                "name" to product.name,
+                "calories" to product.calories,
+                "proteins" to product.proteins,
+                "fats" to product.fats,
+                "carbs" to product.carbs,
+                "category" to product.category,
+                "createdAt" to Timestamp.now()
+            )
+            val doc = customFoodProductsCollection.add(data).await()
+            Result.success(doc.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun observeCustomFoodProducts(): Flow<List<FoodProduct>> = callbackFlow {
+        val userId = auth.currentUser?.uid ?: run {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val listener = customFoodProductsCollection
+            .whereEqualTo("userId", userId)
+            .addSnapshotListener { snapshot, _ ->
+                val products = snapshot?.documents?.mapNotNull { doc ->
+                    FoodProduct(
+                        name = doc.getString("name") ?: return@mapNotNull null,
+                        calories = (doc.get("calories") as? Number)?.toFloat() ?: 0f,
+                        proteins = (doc.get("proteins") as? Number)?.toFloat() ?: 0f,
+                        fats = (doc.get("fats") as? Number)?.toFloat() ?: 0f,
+                        carbs = (doc.get("carbs") as? Number)?.toFloat() ?: 0f,
+                        category = doc.getString("category") ?: ""
+                    )
+                }?.sortedBy { it.name } ?: emptyList()
+                trySend(products)
+            }
+        awaitClose { listener.remove() }
+    }
+
     // ==================== УТИЛИТЫ ====================
     
     private fun mapFirebaseException(e: Exception): Exception {
@@ -1451,6 +1569,8 @@ class FirebaseRepository {
 object FirebaseRepo {
     val instance: FirebaseRepository by lazy { FirebaseRepository() }
 }
+
+const val CHAT_MESSAGE_EDIT_WINDOW_MS: Long = 12L * 60L * 60L * 1000L
 
 /**
  * Конвертирует Uri изображения в data URL (data:image/jpeg;base64,...).
